@@ -1,0 +1,54 @@
+# ── Secrets / credentials ───────────────────────────────────────
+fyers_token.json
+data/api_credentials.json
+*.pem
+*.key
+.env
+.env.*
+
+# ── Logs ────────────────────────────────────────────────────────
+*.log
+app.log
+fyers_logs/
+data/logs/
+
+# ── Python bytecode / build artefacts ───────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Virtual environments ────────────────────────────────────────
+venv/
+env/
+.venv/
+ENV/
+
+# ── Trained model binaries & feature/quote cache (regenerable, large) ──
+data/models/
+data/cache/
+
+# ── Local trade state (regenerable; may contain order IDs) ──────
+data/trades.json
+data/trades.json.phantom_backup_*.json
+data/bot_config.json
+data/watchlist.json
+data/invalid_symbols.json
+
+# ── Generated reports (Excel) ───────────────────────────────────
+reports/*.xlsx
+
+# ── Editor / OS junk ────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+*.tmp
