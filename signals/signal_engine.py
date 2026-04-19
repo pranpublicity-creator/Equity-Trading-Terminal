@@ -146,8 +146,18 @@ class SignalEngine:
             logger.info(f"[QUALIFIER] {symbol} blocked — {qual_result['reason']}")
             return None
 
+        # ===== 5-MIN ON-DEMAND FETCH (Scenario C) =====
+        # Only symbols that cleared GATE + QUALIFIER reach this point — keeps
+        # the extra API calls to ~10-25 per cycle instead of the full 96.
+        df_5min = None
+        if getattr(config, "INTRADAY_PATTERNS_ENABLED", True) and self.data_engine is not None:
+            try:
+                df_5min = self.data_engine.fetch_5min_for_signal(symbol)
+            except Exception as _e5:
+                logger.debug(f"[5min] fetch skipped for {symbol}: {_e5}")
+
         # ===== LAYER 3: TRIGGER =====
-        return self._trigger(symbol, df, enricher_data, strategy)
+        return self._trigger(symbol, df, enricher_data, strategy, df_5min=df_5min)
 
     def _gate_check(self, enricher_data) -> dict:
         """Layer 1: Basic market access checks."""
@@ -207,14 +217,25 @@ class SignalEngine:
         return {"passed": True, "reason": ""}
 
     def _trigger(self, symbol: str, df: pd.DataFrame,
-                 enricher_data: dict, strategy: str) -> Optional[TradeSignal]:
+                 enricher_data: dict, strategy: str,
+                 df_5min: pd.DataFrame = None) -> Optional[TradeSignal]:
         """Layer 3: Full ML + pattern fusion pipeline."""
         import time
 
-        # 1. Detect patterns
+        # 1. Detect patterns (15-min swing patterns)
         patterns = self.pattern_detector.detect_for_symbol(
             symbol, df, enricher_data, self.data_engine
         )
+
+        # 1b. Detect intraday patterns (5-min, on-demand) and PREPEND them
+        #     so the fusion step sees them first (higher priority).
+        if df_5min is not None:
+            regime_hint = detect_regime(df).get("regime", "")
+            intraday_pats = self.pattern_detector.detect_intraday(
+                df_5min, regime_15min=regime_hint
+            )
+            if intraday_pats:
+                patterns = intraday_pats + list(patterns)
 
         # 2. Build features
         feature_df = self.feature_pipeline.build_features(

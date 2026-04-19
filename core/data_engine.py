@@ -93,7 +93,10 @@ class DataEngine:
         return row[0] if row and row[0] else None
 
     def _is_cache_fresh(self, symbol, resolution):
-        """Check if cache is fresh enough (within CACHE_FRESHNESS_SEC)."""
+        """Check if cache is fresh enough.
+        Uses CACHE_FRESHNESS_5MIN_SEC for 5-min data (one candle = 300 s),
+        CACHE_FRESHNESS_SEC for all other resolutions (one 15-min candle = 900 s).
+        """
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT last_update FROM cache_meta WHERE symbol=? AND resolution=?",
@@ -103,8 +106,11 @@ class DataEngine:
             return False
         try:
             last_update = datetime.fromisoformat(row[0])
-            age_sec = (datetime.now() - last_update).total_seconds()
-            return age_sec < config.CACHE_FRESHNESS_SEC
+            age_sec     = (datetime.now() - last_update).total_seconds()
+            freshness   = (config.CACHE_FRESHNESS_5MIN_SEC
+                           if resolution == "5"
+                           else config.CACHE_FRESHNESS_SEC)
+            return age_sec < freshness
         except (ValueError, TypeError):
             return False
 
@@ -236,6 +242,32 @@ class DataEngine:
                 time.sleep(config.BATCH_DELAY)
 
         return result
+
+    def fetch_5min_for_signal(self, symbol: str):
+        """Fetch 5-min OHLCV on-demand for a gate-passing symbol.
+
+        Called ONLY after a symbol passes GATE + QUALIFIER so the API cost
+        is bounded to ~10-25 calls per scan cycle (not all 96 stocks).
+
+        Cache freshness: 300 s = 1 five-minute candle
+        History window:  ORB_HISTORY_DAYS days  (default 5)
+
+        Returns:
+            pd.DataFrame with 5-min OHLCV  (index = datetime),
+            or None if fetch fails / symbol has no data.
+        """
+        import config as _cfg
+        days = getattr(_cfg, "ORB_HISTORY_DAYS", 5)
+        try:
+            df = self.fetch_symbol(symbol, resolution="5", days=days)
+            if df is not None and len(df) >= 10:
+                logger.debug(f"[5min] {symbol}: {len(df)} bars loaded")
+                return df
+            logger.debug(f"[5min] {symbol}: insufficient bars ({len(df) if df is not None else 0})")
+            return None
+        except Exception as e:
+            logger.warning(f"[5min] fetch failed for {symbol}: {e}")
+            return None
 
     def fetch_multi_timeframe(self, symbol, timeframes=None):
         """Fetch data for multiple timeframes for multi-TF validation.

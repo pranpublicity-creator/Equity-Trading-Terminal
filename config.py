@@ -57,9 +57,22 @@ NSE_HOLIDAYS_2026 = [
 # =============================================================
 CANDLE_RESOLUTION = "15"        # 15-min candles (primary timeframe)
 CANDLE_HISTORY_DAYS = 90        # Days of history to cache
-CACHE_FRESHNESS_SEC = 900       # 15 min = 1 candle
+CACHE_FRESHNESS_SEC      = 900  # 15 min = 1 candle
+CACHE_FRESHNESS_5MIN_SEC = 300  # 5 min  = 1 candle (on-demand intraday fetch)
 MULTI_TIMEFRAMES = ["5", "15", "60"]
 POLL_INTERVAL = 3               # seconds between poll cycles
+
+# =============================================================
+# INTRADAY PATTERN ENGINE (5-min)
+# =============================================================
+INTRADAY_PATTERNS_ENABLED = True   # master switch for 5-min intraday detectors
+
+# Opening Range Breakout (ORB)
+ORB_CANDLES          = 6     # first N × 5-min bars define the range (6 × 5 = 30 min)
+ORB_VOLUME_MULT      = 1.3   # breakout bar volume must be ≥ 1.3× ORB-period average
+ORB_MIN_RANGE_PCT    = 0.003 # ORB range / midprice must be ≥ 0.3% (filters flat opens)
+ORB_MAX_RANGE_PCT    = 0.04  # ORB range / midprice must be ≤ 4.0% (filters gap-up chaos)
+ORB_HISTORY_DAYS     = 5     # days of 5-min history to cache per symbol
 
 # =============================================================
 # PATTERN ENGINE

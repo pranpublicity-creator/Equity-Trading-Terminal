@@ -14,6 +14,7 @@ from patterns import reversal_patterns
 from patterns import continuation_patterns
 from patterns import breakout_patterns
 from patterns import volatility_patterns
+from patterns import intraday_patterns
 from patterns.pattern_validator import PatternValidator
 from patterns.multi_tf_validator import MultiTimeframeValidator
 
@@ -124,6 +125,43 @@ class PatternDetector:
         validated = [p for p in validated if p.confidence >= config.PATTERN_MIN_CONFIDENCE]
 
         return validated[:5]
+
+    def detect_intraday(
+        self,
+        df_5min,
+        regime_15min: str = "",
+    ) -> List[PatternResult]:
+        """Run all 5-min intraday pattern detectors.
+
+        Called AFTER a symbol passes GATE + QUALIFIER on 15-min data and
+        the 5-min bars have been fetched on-demand.  Results are merged with
+        the 15-min pattern list inside signal_engine._trigger() — intraday
+        patterns are prepended so they get priority in the fusion step.
+
+        Args:
+            df_5min      : 5-min OHLCV DataFrame (from DataEngine.fetch_5min_for_signal)
+            regime_15min : regime string from detect_regime() on 15-min data
+
+        Returns:
+            List of PatternResult (timeframe="5"), sorted by confidence desc.
+            Empty list if intraday patterns are disabled or df_5min is None.
+        """
+        if not getattr(config, "INTRADAY_PATTERNS_ENABLED", True):
+            return []
+        if df_5min is None or len(df_5min) < 10:
+            return []
+
+        try:
+            results = intraday_patterns.detect_all_intraday(
+                df_5min, regime_15min=regime_15min
+            )
+            if results:
+                names = [p.pattern_name for p in results]
+                logger.info(f"[INTRADAY] {len(results)} pattern(s) detected: {names}")
+            return results
+        except Exception as e:
+            logger.warning(f"[INTRADAY] detector error: {e}")
+            return []
 
     def _deduplicate(self, patterns: List[PatternResult]) -> List[PatternResult]:
         """Remove overlapping patterns, keeping highest confidence."""
