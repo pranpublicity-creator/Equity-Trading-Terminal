@@ -368,7 +368,8 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
 
     <!-- Panel header tabs -->
     <div style="border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg-base);" class="flex items-center gap-0 px-4">
-      <button class="tab-btn active" onclick="switchTab('active')">Active Signals</button>
+      <button class="tab-btn active" onclick="switchTab('swing')">Swing Signals <span id="swingTabCount" class="ml-1 px-1 py-0 rounded text-[9px] font-bold bg-slate-700/80 text-amber-400 hidden"></span></button>
+      <button class="tab-btn" onclick="switchTab('intraday')">⚡ Intraday <span id="intradayTabCount" class="ml-1 px-1 py-0 rounded text-[9px] font-bold bg-slate-700/80 text-violet-400 hidden"></span></button>
       <button class="tab-btn" onclick="switchTab('scanner')">Scanner</button>
       <button class="tab-btn" onclick="switchTab('heatmap')">Heatmap</button>
       <div class="ml-auto flex items-center gap-3 py-1">
@@ -385,17 +386,32 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
       </div>
     </div>
 
-    <!-- TAB: Active Signals -->
-    <div id="tab-active" style="flex:1;overflow-y:auto;padding:10px;" class="space-y-2">
-      <div id="active-cards-container" class="space-y-2">
+    <!-- TAB: Swing Trade Signals (15-min patterns) -->
+    <div id="tab-swing" style="flex:1;overflow-y:auto;padding:10px;" class="space-y-2">
+      <div id="swing-cards-container" class="space-y-2">
         <!-- Populated by JS -->
-        <div class="text-center text-slate-600 text-sm py-10">No active signals — press Start to begin scanning</div>
+        <div class="text-center text-slate-600 text-sm py-10">No swing signals — press Start to begin scanning</div>
       </div>
-
-      <!-- Pending signals section -->
-      <div id="pending-section" class="hidden">
+      <!-- Swing pending section -->
+      <div id="swing-pending-section" class="hidden">
         <div class="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-2 mt-4">⏳ Pending Confirmation</div>
-        <div id="pending-cards-container" class="space-y-2"></div>
+        <div id="swing-pending-container" class="space-y-2"></div>
+      </div>
+    </div>
+
+    <!-- TAB: Intraday Signals (5-min patterns) -->
+    <div id="tab-intraday" style="flex:1;overflow-y:auto;padding:10px;display:none;" class="space-y-2">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-violet-400">5-min Intraday</span>
+        <span class="text-[10px] text-slate-600">· ORB · VWAP Reclaim/Reject · ABCD · NR7 · Inside Bar</span>
+      </div>
+      <div id="intraday-cards-container" class="space-y-2">
+        <div class="text-center text-slate-600 text-sm py-10">No intraday signals yet — fires after ORB, VWAP, NR7 or Inside Bar setup completes</div>
+      </div>
+      <!-- Intraday pending section -->
+      <div id="intraday-pending-section" class="hidden">
+        <div class="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-2 mt-4">⏳ Pending Confirmation</div>
+        <div id="intraday-pending-container" class="space-y-2"></div>
       </div>
     </div>
 
@@ -1215,7 +1231,8 @@ function recordSignalToday(sig){
     regime: sig.regime||'',
     entry: sig.entry_price||sig.entry||0,
     stop: sig.stop_loss||sig.sl||0,
-    target: sig.target_price||sig.target||0
+    target: sig.target_price||sig.target||0,
+    timeframe: sig.timeframe||'15'
   });
   _saveSignalsToday();
   const sc=document.getElementById('signalCount');
@@ -1229,6 +1246,7 @@ function showSignalsTodayModal(){
          <thead class="text-slate-500 uppercase tracking-wider text-[10px]">
            <tr><th class="text-left px-2 py-1.5">Time</th>
                <th class="text-left px-2 py-1.5">Symbol</th>
+               <th class="px-2 py-1.5">TF</th>
                <th class="px-2 py-1.5">Dir</th>
                <th class="px-2 py-1.5">Conf</th>
                <th class="text-left px-2 py-1.5">Pattern</th>
@@ -1244,9 +1262,14 @@ function showSignalsTodayModal(){
         const sym=(r.symbol||'').replace('NSE:','').replace('-EQ','');
         const dirC=(r.direction||'').toUpperCase().includes('BUY')||r.direction==='LONG'?'text-emerald-400':'text-red-400';
         const confC=r.confidence>=75?'text-emerald-400':r.confidence>=65?'text-amber-400':'text-slate-300';
+        const tf=r.timeframe||'15';
+        const tfBadge=tf==='5'
+          ? `<span style="font-size:9px;font-weight:700;background:rgba(139,92,246,.2);color:#a78bfa;border:1px solid rgba(139,92,246,.35);padding:1px 5px;border-radius:3px;">5m</span>`
+          : `<span style="font-size:9px;font-weight:700;background:rgba(20,184,166,.15);color:#5eead4;border:1px solid rgba(20,184,166,.3);padding:1px 5px;border-radius:3px;">15m</span>`;
         return `<tr class="hover:bg-slate-800/30">
           <td class="px-2 py-1.5 text-slate-400 num">${t}</td>
           <td class="px-2 py-1.5 font-semibold">${sym}</td>
+          <td class="px-2 py-1.5 text-center">${tfBadge}</td>
           <td class="px-2 py-1.5 text-center ${dirC}">${(r.direction||'').toUpperCase()}</td>
           <td class="px-2 py-1.5 text-center ${confC} num">${r.confidence.toFixed(1)}</td>
           <td class="px-2 py-1.5 text-slate-300 text-[10px]">${r.pattern||'-'}</td>
@@ -1581,34 +1604,36 @@ const _knownPositionIds=new Set();
 let _positionsInitialized=false;   // set true after first render so restored trades don't log as new
 const _SESSION_START_TS = Math.floor(Date.now()/1000);
 function renderActiveCards(positions){
-  const container=document.getElementById('active-cards-container');
   const ac=document.getElementById('activeCount'),pc=document.getElementById('posCount');
-  if(!container)return;
+
   if(!positions||positions.length===0){
-    container.innerHTML='<div class="text-center text-slate-600 text-sm py-8">No active positions</div>';
     if(ac)ac.textContent='0';if(pc)pc.textContent='0';
-    // On first call: seed the session marker so subsequent renders treat any new ids as new
+    // Clear both tabs
+    const sc=document.getElementById('swing-cards-container');
+    const ic=document.getElementById('intraday-cards-container');
+    if(sc) sc.innerHTML='<div class="text-center text-slate-600 text-sm py-8">No swing positions</div>';
+    if(ic) ic.innerHTML='<div class="text-center text-slate-600 text-sm py-8">No intraday positions yet</div>';
+    _updateTabCountBadge('swingTabCount', 0);
+    _updateTabCountBadge('intradayTabCount', 0);
     _positionsInitialized=true;
     return;
   }
   if(ac)ac.textContent=positions.length;if(pc)pc.textContent=positions.length;
-  // Detect genuinely new positions → alert.
-  // Skip logging on very first load (those are restored from trades.json, not new trades this session).
+
+  // ── Detect genuinely new positions → alert ───────────────────────────────
+  // Skip on very first load (those are restored from trades.json, not new this session).
   let hasNew=false;
   positions.forEach(p=>{
     if(!_knownPositionIds.has(p.id)){
       _knownPositionIds.add(p.id);
-      // Only log as "new trade" if:
-      //   (a) we've already initialized (first load is a snapshot, not events), AND
-      //   (b) the entry_time is within this session (not stale from a prior run)
       const entryTs=Number(p.entry_time||0);
       const isThisSession = entryTs >= _SESSION_START_TS - 30; // 30s grace
       if(_positionsInitialized && isThisSession){
         hasNew=true;
         const ticker=(p.symbol||'').replace('NSE:','').replace('-EQ','');
         const ts=entryTs?_fmtTs(entryTs):'';
-        addLog(`${p.direction} ${ticker} @ ₹${(p.entry_price||0).toFixed(2)} | conf ${(p.signal_confidence||0).toFixed(1)}% | ${p.pattern_name||'signal'} | ${ts}`,'trade');
-        // Browser notification if permitted
+        const tfLabel=(p.timeframe==='5')?'[5m] ':'[15m] ';
+        addLog(`${tfLabel}${p.direction} ${ticker} @ ₹${(p.entry_price||0).toFixed(2)} | conf ${(p.signal_confidence||0).toFixed(1)}% | ${p.pattern_name||'signal'} | ${ts}`,'trade');
         if(Notification.permission==='granted'){
           new Notification(`⚡ ${p.direction} ${ticker}`,{body:`Entry ₹${(p.entry_price||0).toFixed(2)} | ${p.pattern_name||''} | conf ${(p.signal_confidence||0).toFixed(1)}%`,icon:''});
         }
@@ -1616,7 +1641,8 @@ function renderActiveCards(positions){
     }
   });
   _positionsInitialized=true;
-  // Cache chart-ready data per symbol for 📈 button lookup (avoids JSON-in-HTML bug)
+
+  // ── Cache chart-ready data per symbol for 📈 button ─────────────────────
   positions.forEach(p=>{
     _chartDataStore[p.symbol]={
       entry_price:p.entry_price, stop_loss:p.stop_loss,
@@ -1630,8 +1656,36 @@ function renderActiveCards(positions){
       signal_strength:p.signal_strength,
     };
   });
+
   if(hasNew){ playTradeAlert(); showToast('green',`<strong>New trade entered</strong>`); }
-  container.innerHTML=positions.map(p=>buildPositionCard(p)).join('');
+
+  // ── Split by timeframe and render into correct tab ───────────────────────
+  const swingPos   = positions.filter(p=>(p.timeframe||'15')!=='5');
+  const intradayPos= positions.filter(p=>(p.timeframe||'15')==='5');
+
+  const swingEl  = document.getElementById('swing-cards-container');
+  const intradEl = document.getElementById('intraday-cards-container');
+
+  if(swingEl){
+    swingEl.innerHTML = swingPos.length
+      ? swingPos.map(p=>buildPositionCard(p)).join('')
+      : '<div class="text-center text-slate-600 text-sm py-8">No swing positions</div>';
+  }
+  if(intradEl){
+    intradEl.innerHTML = intradayPos.length
+      ? intradayPos.map(p=>buildPositionCard(p)).join('')
+      : '<div class="text-center text-slate-600 text-sm py-8">No intraday positions yet — fires after ORB, VWAP, NR7 or Inside Bar setup completes</div>';
+  }
+
+  _updateTabCountBadge('swingTabCount',    swingPos.length);
+  _updateTabCountBadge('intradayTabCount', intradayPos.length);
+}
+
+function _updateTabCountBadge(id, n){
+  const el=document.getElementById(id);
+  if(!el)return;
+  if(n>0){ el.textContent=n; el.classList.remove('hidden'); }
+  else    { el.classList.add('hidden'); }
 }
 
 function buildPositionCard(p){
@@ -1646,6 +1700,11 @@ function buildPositionCard(p){
   const rr=p.risk_reward||0;
   const entryTs=p.entry_time?_fmtTs(p.entry_time):'--';
   const capital=(p.entry_price||0)*(p.quantity||1);
+  // Timeframe badge: 5m = violet (intraday), 15m = teal (swing)
+  const isIntraday=(p.timeframe==='5');
+  const tfBadge=isIntraday
+    ? `<span title="Intraday 5-min pattern" style="font-size:8px;font-weight:700;background:rgba(139,92,246,.2);color:#a78bfa;border:1px solid rgba(139,92,246,.35);padding:1px 5px;border-radius:3px;">5m</span>`
+    : `<span title="Swing 15-min pattern"   style="font-size:8px;font-weight:700;background:rgba(20,184,166,.15);color:#5eead4;border:1px solid rgba(20,184,166,.3);padding:1px 5px;border-radius:3px;">15m</span>`;
 
   return `<div class="card p-3 ${borderClass}">
     <!-- Row 1: symbol + timestamp + P&L + actions -->
@@ -1654,6 +1713,7 @@ function buildPositionCard(p){
         <div class="flex items-center gap-2">
           <span class="text-xs font-bold ${dirClass}">${p.direction}</span>
           <span class="font-bold text-sm text-slate-100">${ticker}</span>
+          ${tfBadge}
           ${p.pattern_name?`<span class="text-xs bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded">${p.pattern_name.replace(/_/g,' ')}</span>`:''}
           <span class="rbadge r-${p.regime||'CONSOLIDATION'}">${(p.regime||'--').replace(/_/g,' ')}</span>
         </div>
@@ -1699,18 +1759,7 @@ function buildPositionCard(p){
   </div>`;
 }
 
-function renderPendingCards(pending){
-  const container=document.getElementById('pending-cards-container');
-  const section=document.getElementById('pending-section');
-  const pc=document.getElementById('pendingCount');
-  if(!container||!section)return;
-  // AUTO mode: no confirmations needed — hide section
-  if(state.autoExec||!pending||pending.length===0){
-    section.classList.add('hidden');if(pc)pc.textContent='0';return;
-  }
-  if(pc)pc.textContent=pending.length;
-  section.classList.remove('hidden');
-  container.innerHTML=pending.map(p=>{
+function _buildPendingCardHtml(p){
     const ticker=(p.symbol||'').replace('NSE:','').replace('-EQ','');
     const isLong=p.direction==='BUY';
     const conf=(p.signal_confidence||0).toFixed(1);
@@ -1741,7 +1790,47 @@ function renderPendingCards(pending){
         <span class="ml-auto text-amber-500 font-semibold">⏳ Manual confirmation required</span>
       </div>
     </div>`;
-  }).join('');
+}
+
+function renderPendingCards(pending){
+  const swingSection    = document.getElementById('swing-pending-section');
+  const swingContainer  = document.getElementById('swing-pending-container');
+  const intradaySection = document.getElementById('intraday-pending-section');
+  const intradayContainer = document.getElementById('intraday-pending-container');
+  const pc = document.getElementById('pendingCount');
+
+  // AUTO mode or empty — hide both pending sections
+  if(state.autoExec || !pending || pending.length===0){
+    if(swingSection)    swingSection.classList.add('hidden');
+    if(intradaySection) intradaySection.classList.add('hidden');
+    if(pc) pc.textContent='0';
+    return;
+  }
+
+  if(pc) pc.textContent=pending.length;
+
+  const swingPend   = pending.filter(p=>(p.timeframe||'15')!=='5');
+  const intradyPend = pending.filter(p=>(p.timeframe||'15')==='5');
+
+  // Swing pending
+  if(swingSection && swingContainer){
+    if(swingPend.length){
+      swingSection.classList.remove('hidden');
+      swingContainer.innerHTML=swingPend.map(p=>_buildPendingCardHtml(p)).join('');
+    } else {
+      swingSection.classList.add('hidden');
+    }
+  }
+
+  // Intraday pending
+  if(intradaySection && intradayContainer){
+    if(intradyPend.length){
+      intradaySection.classList.remove('hidden');
+      intradayContainer.innerHTML=intradyPend.map(p=>_buildPendingCardHtml(p)).join('');
+    } else {
+      intradaySection.classList.add('hidden');
+    }
+  }
 }
 
 // ── Model bars ───────────────────────────────────────────────
@@ -2027,12 +2116,15 @@ function updateScannerRow(sym, data){
 
 // ── Tab switching ─────────────────────────────────────────────
 function switchTab(name){
-  ['active','scanner','heatmap'].forEach(t=>{
-    document.getElementById('tab-'+t).style.display=t===name?'flex':'none';
-    if(t==='active')document.getElementById('tab-'+t).style.display=t===name?'block':'none';
+  // 'swing' and 'intraday' use block layout; scanner uses flex (table); heatmap uses block
+  ['swing','intraday','scanner','heatmap'].forEach(t=>{
+    const el=document.getElementById('tab-'+t);
+    if(!el)return;
+    el.style.display= t===name ? (t==='scanner'?'flex':'block') : 'none';
   });
   document.querySelectorAll('.tab-btn').forEach((b,i)=>{
-    const tabs=['active','scanner','heatmap'];b.classList.toggle('active',tabs[i]===name);
+    const tabs=['swing','intraday','scanner','heatmap'];
+    b.classList.toggle('active',tabs[i]===name);
   });
   if(name==='scanner')renderScannerTable();
   if(name==='heatmap')renderHeatmap();
@@ -3209,8 +3301,8 @@ function _checkEodTime(){
   // Trigger at 15:10 IST (system timezone assumed IST)
   if(h===15 && m>=10 && m<=25 && !_eodShownToday){
     // Check if there are active positions
-    const activeCards=document.getElementById('active-cards-container');
-    if(activeCards && activeCards.children.length>0 && activeCards.innerHTML.indexOf('No active')< 0){
+    const activeCards=document.getElementById('swing-cards-container')||document.getElementById('intraday-cards-container');
+    if(activeCards && activeCards.children.length>0 && activeCards.innerHTML.indexOf('No ')<0){
       _showEodModal();
     }
   }
