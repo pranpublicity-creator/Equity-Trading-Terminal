@@ -1220,19 +1220,42 @@ function _saveSignalsToday(){
   try{ localStorage.setItem(_SIGTODAY_KEY, JSON.stringify({day:_todayDayKey(), list:_signalsToday.slice(-500)})); }catch(e){}
 }
 let _signalsToday=_loadSignalsToday();
+// Per-session dedup set: "SYMBOL|PATTERN|ROUND(ENTRY,1)|DIR"
+// Mirrors the backend signature so repeated scan emissions are suppressed.
+const _sigTodayDedup=new Set(
+  (()=>{try{const raw=localStorage.getItem(_SIGTODAY_KEY);
+    if(!raw)return[];const o=JSON.parse(raw);
+    const d=new Date(Date.now()+5.5*3600*1000);
+    const k=d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
+    if(o&&o.day===k&&Array.isArray(o.list))
+      return o.list.map(r=>`${r.symbol}|${r.pattern||''}|${Math.round((r.entry||0)*10)/10}|${r.direction||''}`);
+  }catch(e){}return[];})()
+);
 function recordSignalToday(sig){
   if(!sig||!sig.symbol) return;
+  const pattern = sig.pattern_name||sig.pattern||'';
+  const entry   = sig.entry_price||sig.entry||0;
+  const dir     = sig.direction||sig.dir||'';
+  // Dedup key: same logic as backend _sig_tuple (symbol, pattern, round(entry,1), direction)
+  const dedupKey=`${sig.symbol}|${pattern}|${Math.round(entry*10)/10}|${dir}`;
+  if(_sigTodayDedup.has(dedupKey)) return;  // already recorded this signal today
+  _sigTodayDedup.add(dedupKey);
+  // Infer timeframe from pattern name (backward-compat when backend omits it)
+  const _5mPats=['orb_breakout','orb_breakdown','vwap_reclaim','vwap_rejection',
+                 'abcd_harmonic','nr7_breakout','nr7_breakdown',
+                 'inside_bar_breakout','inside_bar_breakdown'];
+  const tf=_5mPats.includes(pattern)?'5':(sig.timeframe||'15');
   _signalsToday.push({
     ts: Math.floor(Date.now()/1000),
     symbol: sig.symbol,
-    direction: sig.direction||sig.dir||'',
+    direction: dir,
     confidence: Number(sig.confidence||sig.conf||0),
-    pattern: sig.pattern_name||sig.pattern||'',
+    pattern,
     regime: sig.regime||'',
-    entry: sig.entry_price||sig.entry||0,
+    entry,
     stop: sig.stop_loss||sig.sl||0,
     target: sig.target_price||sig.target||0,
-    timeframe: sig.timeframe||'15'
+    timeframe: tf
   });
   _saveSignalsToday();
   const sc=document.getElementById('signalCount');
