@@ -359,7 +359,7 @@ class SignalEngine:
         # Build signal
         signal = TradeSignal(
             symbol=symbol,
-            timeframe=config.CANDLE_RESOLUTION,
+            timeframe=patterns[0].timeframe if patterns else config.CANDLE_RESOLUTION,
             direction=fusion_result.direction,
             confidence=fusion_result.confidence,
             strength=fusion_result.strength,

@@ -1262,7 +1262,11 @@ function showSignalsTodayModal(){
         const sym=(r.symbol||'').replace('NSE:','').replace('-EQ','');
         const dirC=(r.direction||'').toUpperCase().includes('BUY')||r.direction==='LONG'?'text-emerald-400':'text-red-400';
         const confC=r.confidence>=75?'text-emerald-400':r.confidence>=65?'text-amber-400':'text-slate-300';
-        const tf=r.timeframe||'15';
+        // Infer TF from pattern name when backend omitted it (backward-compat for cached records)
+        const _5mPatterns=['orb_breakout','orb_breakdown','vwap_reclaim','vwap_rejection',
+                           'abcd_harmonic','nr7_breakout','nr7_breakdown',
+                           'inside_bar_breakout','inside_bar_breakdown'];
+        const tf=(_5mPatterns.includes(r.pattern||'')) ? '5' : (r.timeframe||'15');
         const tfBadge=tf==='5'
           ? `<span style="font-size:9px;font-weight:700;background:rgba(139,92,246,.2);color:#a78bfa;border:1px solid rgba(139,92,246,.35);padding:1px 5px;border-radius:3px;">5m</span>`
           : `<span style="font-size:9px;font-weight:700;background:rgba(20,184,166,.15);color:#5eead4;border:1px solid rgba(20,184,166,.3);padding:1px 5px;border-radius:3px;">15m</span>`;
