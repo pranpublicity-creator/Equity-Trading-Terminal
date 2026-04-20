@@ -67,6 +67,7 @@ from trading.trade_engine import TradeEngine
 from trading.risk_manager import RiskManager
 from trading.charge_calculator import ChargeCalculator
 from trading.telegram_notifier import TelegramNotifier
+from trading.telegram_commander import TelegramCommander
 from trading.webhook_executor import WebhookExecutor
 from trading.portfolio_allocator import PortfolioAllocator
 
@@ -101,6 +102,15 @@ portfolio_allocator = PortfolioAllocator()
 # Notifications
 telegram = TelegramNotifier()
 webhook_exec = WebhookExecutor(trade_engine, signal_engine)
+
+# Telegram command handler — polls for /help /status /positions etc.
+commander = TelegramCommander(telegram, trade_engine=trade_engine)
+commander.set_scanner_fns(
+    fn_start      = lambda: _start_poller(),
+    fn_stop       = lambda: globals().update(_poller_running=False),
+    fn_is_running = lambda: _poller_running,
+)
+commander.start()
 
 # State
 _poller_running = False
@@ -960,6 +970,14 @@ def _emit_dashboard_update(signals, scanner_rows=None):
     try:
         from dataclasses import asdict
         progress = watchlist.get_rotation_progress()
+
+        # Feed new signals into Telegram commander's buffer (/signals command)
+        if signals:
+            for sig in signals:
+                try:
+                    commander.push_signal(sig)
+                except Exception:
+                    pass
 
         # Top signals: all signals this cycle sorted by confidence desc (capped at 10)
         top_signals = sorted(
