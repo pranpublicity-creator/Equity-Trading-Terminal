@@ -829,8 +829,8 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
 </div>
 
 <!-- ── Pattern Chart Modal (TradingView Widget) ──────── -->
-<div id="patternChartModal" class="fixed inset-0 z-50 hidden flex items-center justify-center" style="background:rgba(0,0,0,.75);backdrop-filter:blur(4px);">
-  <div class="relative w-full max-w-5xl mx-4 rounded-xl border border-slate-700 overflow-hidden" style="background:#0c1829;max-height:92vh;">
+<div id="patternChartModal" class="fixed inset-0 z-50 hidden flex items-center justify-center" style="background:rgba(0,0,0,.80);backdrop-filter:blur(4px);">
+  <div class="relative w-full max-w-7xl mx-3 rounded-xl border border-slate-700 overflow-hidden" style="background:#0c1829;max-height:96vh;width:96vw;">
     <!-- Header -->
     <div class="flex items-center justify-between px-4 py-2 border-b border-slate-800">
       <div class="flex items-center gap-3">
@@ -847,9 +847,9 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
       </div>
     </div>
     <!-- Chart + Signal details. Left = Lightweight Charts candlestick with pattern overlay. Right = rich details. -->
-    <div id="patternChartDiv" style="width:100%;height:540px;overflow:hidden;display:flex;">
+    <div id="patternChartDiv" style="width:100%;height:calc(88vh - 100px);min-height:480px;overflow:hidden;display:flex;">
       <!-- Left: chart canvas + loading overlay -->
-      <div style="flex:1 1 60%;min-width:0;position:relative;background:#0a1220;">
+      <div style="flex:1 1 64%;min-width:0;position:relative;background:#0a1220;">
         <div id="lwChartHost" style="position:absolute;inset:0;"></div>
         <div id="lwChartLoading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#64748b;font-size:12px;pointer-events:none;">
           <div style="width:22px;height:22px;border:2px solid #334155;border-top-color:#60a5fa;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
@@ -857,16 +857,17 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
         </div>
         <div id="lwChartError" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;padding:20px;text-align:center;color:#ef4444;font-size:12px;"></div>
         <!-- Legend overlay -->
-        <div id="lwChartLegend" style="position:absolute;top:10px;left:10px;background:rgba(12,24,41,0.85);border:1px solid #1e293b;border-radius:6px;padding:6px 10px;font-size:10px;color:#94a3b8;pointer-events:none;display:flex;gap:12px;flex-wrap:wrap;max-width:calc(100% - 20px);">
+        <div id="lwChartLegend" style="position:absolute;top:10px;left:10px;background:rgba(12,24,41,0.88);border:1px solid #1e293b;border-radius:6px;padding:6px 10px;font-size:10px;color:#94a3b8;pointer-events:none;display:flex;gap:10px;flex-wrap:wrap;max-width:calc(100% - 20px);">
           <span><span style="color:#f59e0b;">■</span> Entry</span>
           <span><span style="color:#ef4444;">■</span> SL</span>
           <span><span style="color:#10b981;">■</span> Target</span>
-          <span><span style="color:#a78bfa;">■</span> Trigger/Neckline</span>
+          <span><span style="color:#a78bfa;">■</span> Neckline</span>
           <span><span style="color:#22d3ee;">▲▼</span> Swings</span>
+          <span id="chartLegendShape" style="display:none;"><span id="chartLegendShapeClr" style="color:#22d3ee;">▬▬</span> <span id="chartLegendShapeLbl"></span></span>
         </div>
       </div>
       <!-- Right: signal details (condensed) -->
-      <div id="lwSignalPanel" style="flex:0 0 40%;max-width:40%;overflow-y:auto;background:#0c1829;border-left:1px solid #1e293b;"></div>
+      <div id="lwSignalPanel" style="flex:0 0 36%;max-width:36%;overflow-y:auto;background:#0c1829;border-left:1px solid #1e293b;"></div>
     </div>
     <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
     <!-- Trade info bar -->
@@ -881,22 +882,21 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
   </div>
 </div>
 
-<!-- ── End-of-Day Close/Delivery Modal ────────────────── -->
-<div id="eodModal" class="fixed inset-0 z-50 hidden flex items-center justify-center" style="background:rgba(0,0,0,.8);backdrop-filter:blur(4px);">
-  <div class="relative w-full max-w-lg mx-4 rounded-xl border border-amber-700/50 overflow-hidden" style="background:#0c1829;">
-    <div class="px-4 py-3 border-b border-amber-700/30" style="background:linear-gradient(135deg,#1a0f00,#0c1829);">
+<!-- ── Intraday EOD Auto-Close Modal ──────────────────────── -->
+<div id="eodModal" class="fixed inset-0 z-50 hidden flex items-center justify-center" style="background:rgba(0,0,0,.85);backdrop-filter:blur(4px);">
+  <div class="relative w-full max-w-lg mx-4 rounded-xl border border-red-700/50 overflow-hidden" style="background:#0c1829;">
+    <div class="px-4 py-3 border-b border-red-700/30" style="background:linear-gradient(135deg,#1a0000,#0c1829);">
       <div class="flex items-center gap-2">
-        <span class="text-lg">🔔</span>
-        <span class="font-semibold text-amber-400 text-sm">End of Day — Open Positions</span>
-        <span class="text-xs text-slate-500 ml-auto">Market closes at 15:30</span>
+        <span class="text-lg">⚡</span>
+        <span class="font-semibold text-red-400 text-sm">Intraday Positions — Auto-Close at 15:25</span>
+        <span id="eodCountdown" class="text-xs font-bold text-amber-400 ml-auto bg-amber-900/30 border border-amber-700/40 px-2 py-0.5 rounded">--:--</span>
       </div>
     </div>
     <div class="p-4">
-      <p class="text-xs text-slate-400 mb-3">You have open positions. Choose to <strong class="text-red-400">close now</strong> (intraday exit) or <strong class="text-emerald-400">keep for delivery</strong> (carry overnight).</p>
-      <div id="eodPositionsList" class="space-y-2 max-h-64 overflow-y-auto"></div>
+      <p class="text-xs text-slate-400 mb-3">⚠️ <strong class="text-amber-400">Intraday (5m) positions cannot be carried overnight.</strong> Close now or they will be <strong class="text-red-400">auto-closed at 15:25 IST</strong>.</p>
+      <div id="eodPositionsList" class="space-y-2 max-h-64 overflow-y-auto mb-1"></div>
       <div class="flex gap-2 mt-4">
-        <button onclick="eodCloseAll()" class="flex-1 py-2 bg-red-700 hover:bg-red-600 text-white text-xs font-semibold rounded transition-colors">✕ Close All Now</button>
-        <button onclick="eodKeepAll()" class="flex-1 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold rounded transition-colors">📦 Keep All for Delivery</button>
+        <button onclick="eodCloseAll()" class="flex-1 py-2 bg-red-700 hover:bg-red-600 text-white text-xs font-semibold rounded transition-colors">✕ Close All Intraday Now</button>
         <button onclick="closeEodModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded transition-colors">Decide Later</button>
       </div>
     </div>
@@ -2993,13 +2993,21 @@ function openPatternChart(symbol, signalData){
 }
 
 // ── Lightweight Charts: candlestick + pattern overlay ────────
-let _lwChart = null;
-let _lwSeries = null;
-let _lwVolSeries = null;
-let _lwResizeObs = null;
+let _lwChart      = null;
+let _lwSeries     = null;
+let _lwVolSeries  = null;
+let _lwResizeObs  = null;
 let _lwPriceLines = [];
+let _lwExtraSeries = [];   // shape overlay series (cleared on dispose)
 
 function _disposeLightweightChart(){
+  // Remove pattern-shape overlay series first
+  if(_lwChart){
+    for(const s of _lwExtraSeries){
+      try{ _lwChart.removeSeries(s); }catch(e){}
+    }
+  }
+  _lwExtraSeries = [];
   try{ if(_lwChart){ _lwChart.remove(); } }catch(e){}
   _lwChart=null; _lwSeries=null; _lwVolSeries=null; _lwPriceLines=[];
   if(_lwResizeObs){ try{_lwResizeObs.disconnect();}catch(e){} _lwResizeObs=null; }
@@ -3074,14 +3082,17 @@ async function _renderLightweightChart(symbol, signalData){
     candles: uniq,
     volume: volume,
     pattern: bestPattern ? {
-      name:      bestPattern.name,
-      direction: bestPattern.direction,
-      entry:     Number(signalData.entry_price || bestPattern.entry_price || 0),
-      trigger:   Number(bestPattern.entry_price || 0),
-      stop_loss: Number(bestPattern.stop_loss || 0),
-      target:    Number(bestPattern.target_price || 0),
-      neckline:  Number(bestPattern.neckline || 0),
-      swings:    (bestPattern.swings||[]).map(s=>({time:Number(s.time),price:Number(s.price),type:String(s.type||'HIGH').toUpperCase()})),
+      name:       bestPattern.name,
+      direction:  bestPattern.direction,
+      entry:      Number(signalData.entry_price || bestPattern.entry_price || 0),
+      trigger:    Number(bestPattern.entry_price || 0),
+      stop_loss:  Number(bestPattern.stop_loss || 0),
+      target:     Number(bestPattern.target_price || 0),
+      neckline:   Number(bestPattern.neckline || 0),
+      swings:     (bestPattern.swings||[]).map(s=>({time:Number(s.time),price:Number(s.price),type:String(s.type||'HIGH').toUpperCase()})),
+      upper_line: (bestPattern.upper_line||[]).map(p=>({time:Number(p.time),price:Number(p.price)})),
+      lower_line: (bestPattern.lower_line||[]).map(p=>({time:Number(p.time),price:Number(p.price)})),
+      shape_type: bestPattern.shape_type || 'none',
     } : null,
   };
 
@@ -3143,6 +3154,11 @@ async function _renderLightweightChart(symbol, signalData){
     addLine(neckline,'#a78bfa', 'Neckline '+(neckline?neckline.toFixed(2):''), LightweightCharts.LineStyle.Dotted);
   }
 
+  // ── Pattern shape overlay (trendline boundaries + fill) ──────
+  if(pat && pat.upper_line && pat.lower_line){
+    _drawPatternShape(_lwChart, pat);
+  }
+
   // Swing points as markers
   const markers=[];
   (pat.swings||[]).forEach(s=>{
@@ -3182,6 +3198,98 @@ async function _renderLightweightChart(symbol, signalData){
   }catch(e){}
 
   if(loading) loading.style.display='none';
+}
+
+// ── Pattern shape overlay: filled area between trendlines ────────────────────
+// Uses two stacked AreaSeries to fake a fill between two arbitrary lines:
+//   1. Upper AreaSeries fills DOWN from upper trendline with pattern colour
+//   2. Lower AreaSeries fills DOWN from lower trendline with opaque bg → erases
+//      the pattern colour below the lower trendline, leaving only the band.
+function _drawPatternShape(chart, pat){
+  if(!chart || !pat) return;
+
+  const ul = (pat.upper_line||[]).filter(p=>p.time>0 && p.price>0);
+  const ll = (pat.lower_line||[]).filter(p=>p.time>0 && p.price>0);
+  if(ul.length < 2 && ll.length < 2) return;
+
+  const dir       = (pat.direction||'').toLowerCase();
+  const isBull    = dir==='bullish' || dir==='buy';
+  const lineClr   = isBull ? '#22d3ee' : '#f87171';
+  const fillRgb   = isBull ? '34,211,238' : '248,113,113';
+  const fillClr   = `rgba(${fillRgb},0.11)`;
+  const bgClr     = 'rgba(10,18,32,0.97)';   // must match chart bg #0a1220
+  const shapeType = pat.shape_type || 'none';
+
+  const seriesOpts = {
+    crosshairMarkerVisible: false,
+    lastValueVisible:       false,
+    priceLineVisible:       false,
+  };
+
+  const SHAPED = ['triangle','rectangle','channel','wedge','hs'];
+
+  if(ul.length >= 2 && ll.length >= 2 && SHAPED.includes(shapeType)){
+    // ① Upper boundary → fills DOWN with pattern colour
+    try{
+      const upperS = chart.addAreaSeries({
+        ...seriesOpts,
+        lineColor:   lineClr,
+        lineWidth:   1,
+        lineStyle:   LightweightCharts.LineStyle.Dashed,
+        topColor:    fillClr,
+        bottomColor: fillClr,
+      });
+      upperS.setData(ul.map(p=>({time:p.time, value:p.price})));
+      _lwExtraSeries.push(upperS);
+
+      // ② Lower boundary → fills DOWN with opaque bg to cut out area below
+      const lowerS = chart.addAreaSeries({
+        ...seriesOpts,
+        lineColor:   lineClr,
+        lineWidth:   1,
+        lineStyle:   LightweightCharts.LineStyle.Dashed,
+        topColor:    bgClr,
+        bottomColor: 'rgba(10,18,32,0)',
+      });
+      lowerS.setData(ll.map(p=>({time:p.time, value:p.price})));
+      _lwExtraSeries.push(lowerS);
+    }catch(e){ /* LW Charts version may not support AreaSeries – silent skip */ }
+
+  } else {
+    // Fallback: just draw boundary lines without fill
+    const drawLine = (pts) => {
+      if(pts.length < 2) return;
+      try{
+        const s = chart.addLineSeries({
+          ...seriesOpts,
+          color:     lineClr,
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+        });
+        s.setData(pts.map(p=>({time:p.time, value:p.price})));
+        _lwExtraSeries.push(s);
+      }catch(e){}
+    };
+    drawLine(ul);
+    drawLine(ll);
+  }
+
+  // Update the dedicated legend shape slot
+  const shapeEl  = document.getElementById('chartLegendShape');
+  const shapeClr = document.getElementById('chartLegendShapeClr');
+  const shapeLbl = document.getElementById('chartLegendShapeLbl');
+  if(shapeEl && shapeLbl){
+    const lbl = shapeType && shapeType!=='none'
+      ? shapeType.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()) + ' Pattern'
+      : '';
+    if(lbl){
+      if(shapeClr) shapeClr.style.color = lineClr;
+      shapeLbl.textContent = lbl;
+      shapeEl.style.display = '';
+    } else {
+      shapeEl.style.display = 'none';
+    }
+  }
 }
 
 function _updateChartInfoBar(sd){
@@ -3319,93 +3427,141 @@ function closePatternChart(){
   const panel=document.getElementById('lwSignalPanel'); if(panel) panel.innerHTML='';
 }
 
-// ── End-of-Day Close/Delivery Prompt ─────────────────────────
-let _eodShownToday=false;
+// ── Intraday End-of-Day Auto-Close (15:00 alert → 15:25 force-close) ────────
+let _eodShownToday     = false;   // modal shown once per day
+let _eodAutoCloseDone  = false;   // force-close executed once per day
+let _eodCountdownTimer = null;    // setInterval handle for countdown
 
+// Helper: minutes remaining until 15:25 IST
+function _getEodCountdownText(){
+  const now  = new Date();
+  const close = new Date(now);
+  close.setHours(15, 25, 0, 0);
+  const diff = Math.max(0, close - now);
+  const mins = Math.floor(diff / 60000);
+  const secs = Math.floor((diff % 60000) / 1000);
+  return `${mins}m ${secs.toString().padStart(2,'0')}s`;
+}
+
+// Called every 30 s via setInterval
 function _checkEodTime(){
-  const now=new Date();
-  const h=now.getHours(), m=now.getMinutes();
-  // Trigger at 15:10 IST (system timezone assumed IST)
-  if(h===15 && m>=10 && m<=25 && !_eodShownToday){
-    // Check if there are active positions
-    const activeCards=document.getElementById('swing-cards-container')||document.getElementById('intraday-cards-container');
-    if(activeCards && activeCards.children.length>0 && activeCards.innerHTML.indexOf('No ')<0){
-      _showEodModal();
-    }
+  const now = new Date();
+  const h = now.getHours(), m = now.getMinutes();
+
+  // Reset flags at midnight / next morning
+  if(h < 9){ _eodShownToday = false; _eodAutoCloseDone = false; return; }
+
+  // ── 15:25+ : force-close remaining intraday positions ──────
+  if(h === 15 && m >= 25 && !_eodAutoCloseDone){
+    _eodAutoClose();
+    return;
   }
-  // Reset flag next morning
-  if(h<9) _eodShownToday=false;
+
+  // ── 15:00–15:24 : show alert if intraday positions exist ───
+  if(h === 15 && m >= 0 && m < 25 && !_eodShownToday){
+    const intradayActive = _pendingPositions.filter(
+      p => p.status === 'ACTIVE' && (p.timeframe||'15') === '5'
+    );
+    if(intradayActive.length > 0) _showEodModal();
+  }
+}
+
+function _startEodCountdown(){
+  const el = document.getElementById('eodCountdown');
+  if(!el) return;
+  el.textContent = _getEodCountdownText();
+  if(_eodCountdownTimer) clearInterval(_eodCountdownTimer);
+  _eodCountdownTimer = setInterval(()=>{
+    const elc = document.getElementById('eodCountdown');
+    if(elc) elc.textContent = _getEodCountdownText();
+    // Auto-dismiss modal if all intraday positions have been closed
+    const remaining = _pendingPositions.filter(
+      p => p.status === 'ACTIVE' && (p.timeframe||'15') === '5'
+    );
+    if(remaining.length === 0) closeEodModal();
+  }, 1000);
 }
 
 function _showEodModal(){
-  _eodShownToday=true;
-  const list=document.getElementById('eodPositionsList');
-  if(!list)return;
-  // Get active positions from the last fetchPositions cache
-  const active=_pendingPositions.filter(p=>p.status==='ACTIVE');
-  if(!active.length){return;}
-  list.innerHTML=active.map(p=>{
-    const ticker=(p.symbol||'').replace('NSE:','').replace('-EQ','');
-    const pnl=p.unrealized_pnl||0;
-    const pnlC=pnl>=0?'text-emerald-400':'text-red-400';
-    const dirC=p.direction==='BUY'?'text-emerald-400':'text-red-400';
+  _eodShownToday = true;
+  const list = document.getElementById('eodPositionsList');
+  if(!list) return;
+  const intradayActive = _pendingPositions.filter(
+    p => p.status === 'ACTIVE' && (p.timeframe||'15') === '5'
+  );
+  if(!intradayActive.length) return;
+  list.innerHTML = intradayActive.map(p => {
+    const ticker = (p.symbol||'').replace('NSE:','').replace('-EQ','');
+    const pnl    = p.unrealized_pnl || 0;
+    const pnlC   = pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
+    const dirC   = p.direction === 'BUY' ? 'text-emerald-400' : 'text-red-400';
     return `<div class="flex items-center justify-between px-3 py-2 rounded border border-slate-800" style="background:#0f1f35;">
       <div class="flex items-center gap-3">
         <span class="text-xs font-bold ${dirC}">${p.direction}</span>
         <span class="font-semibold text-slate-100 text-sm">${ticker}</span>
-        <span class="text-xs text-slate-500">x${p.quantity||1}</span>
+        <span class="text-xs text-violet-400">5m</span>
+        <span class="text-xs text-slate-500">×${p.quantity||1}</span>
       </div>
       <div class="flex items-center gap-3">
         <span class="num text-xs font-semibold ${pnlC}">₹${pnl>=0?'+':''}${pnl.toFixed(0)}</span>
-        <button onclick="eodCloseOne('${p.id}')" class="text-xs px-2 py-1 bg-red-900/50 hover:bg-red-800 text-red-300 rounded transition-colors">Close</button>
-        <button onclick="eodKeepOne('${p.id}',this)" class="text-xs px-2 py-1 bg-emerald-900/50 hover:bg-emerald-800 text-emerald-300 rounded transition-colors">Keep</button>
+        <button onclick="eodCloseOne('${p.id}')"
+          class="text-xs px-2 py-1 bg-red-900/50 hover:bg-red-800 text-red-300 rounded transition-colors">Close</button>
       </div>
     </div>`;
   }).join('');
   document.getElementById('eodModal').classList.remove('hidden');
-  // Play alert sound
-  if(typeof playTradeAlert==='function') playTradeAlert();
-  addLog('🔔 End-of-day review: '+active.length+' open position(s) — close or keep for delivery?','warning');
+  _startEodCountdown();
+  if(typeof playTradeAlert === 'function') playTradeAlert();
+  addLog('⚡ Intraday EOD: ' + intradayActive.length +
+    ' position(s) must close by 15:25 IST — auto-close in ' +
+    _getEodCountdownText(), 'warning');
 }
 
 function closeEodModal(){
   document.getElementById('eodModal').classList.add('hidden');
+  if(_eodCountdownTimer){ clearInterval(_eodCountdownTimer); _eodCountdownTimer = null; }
 }
 
 async function eodCloseOne(id){
-  await fetch('/api/cancel_trade/'+id,{method:'POST'});
-  addLog('📤 EOD closed: '+id.split('NSE:').pop().replace(/-EQ_\d+/,''),'trade');
-  fetchPositions();
-  // Remove from modal list
-  const list=document.getElementById('eodPositionsList');
-  if(list && list.children.length<=1) closeEodModal();
-  else _showEodModal(); // refresh modal list
-}
-
-function eodKeepOne(id,btn){
-  // Mark as "kept for delivery" visually — no backend action needed, position stays ACTIVE
-  if(btn){
-    btn.textContent='✓ Kept';
-    btn.disabled=true;
-    btn.classList.remove('bg-emerald-900/50','hover:bg-emerald-800');
-    btn.classList.add('bg-emerald-700','opacity-50');
-  }
-  addLog('📦 Keeping for delivery: '+id.split('NSE:').pop().replace(/-EQ_\d+/,''),'trade');
+  await fetch('/api/cancel_trade/' + id, {method:'POST'});
+  addLog('📤 Intraday closed: ' +
+    id.replace(/NSE:/,'').replace(/-EQ_\d+$/,''), 'trade');
+  await fetchPositions();
+  const remaining = _pendingPositions.filter(
+    p => p.status === 'ACTIVE' && (p.timeframe||'15') === '5'
+  );
+  if(remaining.length === 0) closeEodModal();
+  else _showEodModal();  // refresh list
 }
 
 async function eodCloseAll(){
-  const active=_pendingPositions.filter(p=>p.status==='ACTIVE');
-  for(const p of active){
-    await fetch('/api/cancel_trade/'+p.id,{method:'POST'});
+  const intradayActive = _pendingPositions.filter(
+    p => p.status === 'ACTIVE' && (p.timeframe||'15') === '5'
+  );
+  for(const p of intradayActive){
+    await fetch('/api/cancel_trade/' + p.id, {method:'POST'});
   }
-  addLog('📤 EOD: Closed all '+active.length+' position(s)','trade');
-  fetchPositions();
+  addLog('📤 Intraday EOD: Closed all ' + intradayActive.length +
+    ' intraday position(s)', 'trade');
+  await fetchPositions();
   closeEodModal();
 }
 
-function eodKeepAll(){
-  const active=_pendingPositions.filter(p=>p.status==='ACTIVE');
-  addLog('📦 EOD: Keeping all '+active.length+' position(s) for delivery','trade');
+// Force-close at 15:25 — no user action needed
+async function _eodAutoClose(){
+  _eodAutoCloseDone = true;
+  const intradayActive = _pendingPositions.filter(
+    p => p.status === 'ACTIVE' && (p.timeframe||'15') === '5'
+  );
+  if(!intradayActive.length){ closeEodModal(); return; }
+  addLog('⚡ AUTO-CLOSE 15:25: Closing ' + intradayActive.length +
+    ' intraday position(s)…', 'warning');
+  for(const p of intradayActive){
+    await fetch('/api/cancel_trade/' + p.id, {method:'POST'});
+    addLog('  ⤷ Auto-closed: ' +
+      (p.symbol||'').replace('NSE:','').replace('-EQ',''), 'trade');
+  }
+  await fetchPositions();
   closeEodModal();
 }
 

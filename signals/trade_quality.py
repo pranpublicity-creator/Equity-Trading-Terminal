@@ -267,6 +267,75 @@ def _check_regime_fit(signal, pattern_name, regime) -> QualityCheck:
                         f"{cat}/{reg}", "unmapped combination")
 
 
+def _check_di_alignment(signal, df) -> QualityCheck:
+    """#7 — DI+ / DI− directional alignment.
+
+    ADX tells you HOW STRONG a trend is; DI+/DI− tell you WHICH DIRECTION.
+    A BUY signal with DI− > DI+ means the trend is actually bearish —
+    that's swimming against the current and deserves a penalty.
+
+    Uses pre-computed columns if available, otherwise computes inline.
+    """
+    direction = (signal.direction or "").upper()
+    if not direction or df is None or len(df) < 15:
+        return QualityCheck("di_align", "DI Alignment", True, 0.6,
+                            "n/a", "insufficient data")
+
+    # Prefer pre-computed columns from indicator_engine
+    try:
+        if "plus_di" in df.columns and "minus_di" in df.columns:
+            pdi = float(df["plus_di"].iloc[-1])
+            ndi = float(df["minus_di"].iloc[-1])
+        else:
+            # Inline DM computation (Wilder's, 14-period)
+            h = df["high"].astype(float)
+            l = df["low"].astype(float)
+            c = df["close"].astype(float)
+            up   = h.diff()
+            dn   = -l.diff()
+            pdm  = up.where((up > dn) & (up > 0), 0.0)
+            ndm  = dn.where((dn > up) & (dn > 0), 0.0)
+            tr   = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
+            atr  = tr.rolling(14).sum().replace(0, float("nan"))
+            pdi  = float((100 * pdm.rolling(14).sum() / atr).iloc[-1])
+            ndi  = float((100 * ndm.rolling(14).sum() / atr).iloc[-1])
+
+        if pdi != pdi or ndi != ndi:   # NaN guard
+            return QualityCheck("di_align", "DI Alignment", True, 0.6,
+                                "n/a", "DI not yet computed (warmup)")
+
+        gap   = abs(pdi - ndi)
+        bull  = pdi > ndi
+        val   = f"DI+={pdi:.1f}  DI−={ndi:.1f}"
+
+        if gap < 5:                    # indeterminate — too close to call
+            return QualityCheck("di_align", "DI Alignment", True, 0.6,
+                                val, "DI too close to call — neutral")
+
+        if direction == "BUY":
+            if bull:
+                score = min(1.0, 0.70 + (gap / 60.0) * 0.30)
+                return QualityCheck("di_align", "DI Alignment", True, round(score, 2),
+                                    val, f"DI+ > DI− by {gap:.1f} pts — bullish bias confirmed")
+            else:
+                score = max(0.1, 0.40 - (gap / 60.0) * 0.30)
+                return QualityCheck("di_align", "DI Alignment", False, round(score, 2),
+                                    val, f"DI− > DI+ by {gap:.1f} pts — bearish bias vs BUY signal")
+        else:   # SELL
+            if not bull:
+                score = min(1.0, 0.70 + (gap / 60.0) * 0.30)
+                return QualityCheck("di_align", "DI Alignment", True, round(score, 2),
+                                    val, f"DI− > DI+ by {gap:.1f} pts — bearish bias confirmed")
+            else:
+                score = max(0.1, 0.40 - (gap / 60.0) * 0.30)
+                return QualityCheck("di_align", "DI Alignment", False, round(score, 2),
+                                    val, f"DI+ > DI− by {gap:.1f} pts — bullish bias vs SELL signal")
+
+    except Exception as e:
+        return QualityCheck("di_align", "DI Alignment", True, 0.5,
+                            "error", f"DI computation failed: {e}")
+
+
 def _check_ml_alignment(signal) -> QualityCheck:
     """#6 — ML model agreement.
     Counts how many of 5 models (LGB, XGB, LSTM, TFT, ARIMA) agree with
@@ -333,15 +402,16 @@ def _grade_from_score(score: float) -> str:
 
 
 def score_signal(signal, pattern=None, regime: str = "", df=None) -> QualityReport:
-    """Run the full 6-point framework and return a QualityReport.
+    """Run the full 7-point framework and return a QualityReport.
 
     Weights (sum = 1.0):
-        freshness  0.20
-        risk_size  0.20
-        rr         0.15
-        sl_side    0.20
-        regime     0.10
-        ml         0.15
+        freshness  0.18   ← was 0.20
+        risk_size  0.18   ← was 0.20
+        rr         0.13   ← was 0.15
+        sl_side    0.18   ← was 0.20
+        regime     0.10   (unchanged)
+        ml         0.13   ← was 0.15
+        di_align   0.10   ← NEW: DI+/DI− directional alignment
     """
     checks = [
         _check_freshness(signal, pattern),
@@ -350,9 +420,17 @@ def score_signal(signal, pattern=None, regime: str = "", df=None) -> QualityRepo
         _check_sl_side(signal, pattern),
         _check_regime_fit(signal, getattr(signal, "pattern_name", ""), regime),
         _check_ml_alignment(signal),
+        _check_di_alignment(signal, df),   # NEW — Check #7
     ]
-    weights = {"freshness": 0.20, "risk_size": 0.20, "rr": 0.15,
-               "sl_side":   0.20, "regime":    0.10, "ml": 0.15}
+    weights = {
+        "freshness": 0.18,
+        "risk_size": 0.18,
+        "rr":        0.13,
+        "sl_side":   0.18,
+        "regime":    0.10,
+        "ml":        0.13,
+        "di_align":  0.10,   # NEW
+    }
     total = sum(c.score * weights.get(c.key, 0) for c in checks)
     grade = _grade_from_score(total)
     passed = total >= config.TRADE_QUALITY_MIN_SCORE

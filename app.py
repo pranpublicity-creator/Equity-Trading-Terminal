@@ -705,9 +705,41 @@ def api_chart_data():
         return jsonify({"candles": [], "error": str(e)})
 
 
+def _classify_pattern_shape(pattern_name: str) -> str:
+    """Map pattern name → shape class used by the chart overlay renderer."""
+    n = pattern_name.lower()
+    if any(k in n for k in ("triangle", "wedge", "pennant", "diamond", "broadening")):
+        return "triangle"
+    if "rectangle" in n:
+        return "rectangle"
+    if any(k in n for k in ("flag", "channel", "cup")):
+        return "channel"
+    if any(k in n for k in ("head_shoulder", "double_top", "double_bottom",
+                             "triple_top", "triple_bottom", "rounding")):
+        return "hs"
+    return "horizontal"
+
+
+def _tl_geometry(tl, sample_indices, df):
+    """Return [{time, price}] for a trendline at the given bar indices."""
+    if tl is None:
+        return []
+    pts = []
+    seen_ts = set()
+    for idx in sample_indices:
+        if idx < 0 or idx >= len(df):
+            continue
+        ts = int(df.iloc[idx]["timestamp"])
+        if ts in seen_ts:
+            continue
+        seen_ts.add(ts)
+        pts.append({"time": ts, "price": round(float(tl.price_at(idx)), 2)})
+    return pts
+
+
 @app.route("/api/pattern_overlay")
 def api_pattern_overlay():
-    """Return detected patterns with geometry for chart overlay."""
+    """Return detected patterns with trendline geometry for chart shape overlay."""
     symbol = request.args.get("symbol", "")
     resolution = request.args.get("resolution", "15")
     if not symbol:
@@ -719,6 +751,7 @@ def api_pattern_overlay():
 
         # Run pattern detection
         from patterns.swing_detector import find_swings
+        from patterns.trendline_engine import fit_trendline
         swings = find_swings(df)
         patterns = signal_engine.pattern_detector.detect_all(df, swings)
 
@@ -739,6 +772,24 @@ def api_pattern_overlay():
                 if si <= s.index <= ei and s.index < len(df)
             ]
 
+            # ── Trendline geometry for shape overlay ─────────────────────
+            # Fit upper (highs) and lower (lows) trendlines through the
+            # swings inside the pattern range.
+            pat_swing_objs = [s for s in swings if si <= s.index <= ei]
+            highs_in = [s for s in pat_swing_objs if s.type == "HIGH"]
+            lows_in  = [s for s in pat_swing_objs if s.type == "LOW"]
+            upper_tl = fit_trendline(highs_in) if len(highs_in) >= 2 else None
+            lower_tl = fit_trendline(lows_in)  if len(lows_in)  >= 2 else None
+
+            # 7 evenly-spaced sample indices across [si, ei]
+            span = max(1, ei - si)
+            sample_indices = [si + round(span * t / 6) for t in range(7)]
+            sample_indices = sorted(set(sample_indices + [si, ei]))
+
+            upper_line = _tl_geometry(upper_tl, sample_indices, df)
+            lower_line = _tl_geometry(lower_tl, sample_indices, df)
+            shape_type = _classify_pattern_shape(p.pattern_name)
+
             results.append({
                 "name": p.pattern_name,
                 "variant": p.variant,
@@ -752,6 +803,9 @@ def api_pattern_overlay():
                 "end_time": end_ts,
                 "breakout_confirmed": p.breakout_confirmed,
                 "swings": pattern_swings,
+                "upper_line": upper_line,
+                "lower_line": lower_line,
+                "shape_type": shape_type,
             })
 
         return jsonify({"patterns": results, "symbol": symbol})

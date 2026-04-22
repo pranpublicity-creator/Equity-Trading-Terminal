@@ -51,6 +51,8 @@ class Position:
     quality_grade:  str   = ""
     quality_passed: bool  = True
     quality_report: dict  = field(default_factory=dict)
+    # ── Timeframe that generated this position ──────────────────
+    timeframe: str = "15"          # "5" = intraday, "15" = swing
 
 
 class TradeEngine:
@@ -162,6 +164,7 @@ class TradeEngine:
             quality_grade=getattr(signal,  "quality_grade",  ""),
             quality_passed=getattr(signal, "quality_passed", True),
             quality_report=getattr(signal, "quality_report", {}) or {},
+            timeframe=getattr(signal,      "timeframe",      "15"),
         )
 
         if self.auto_execute:

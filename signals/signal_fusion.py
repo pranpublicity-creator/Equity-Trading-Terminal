@@ -38,12 +38,13 @@ class SignalFusion:
 
     def __init__(self):
         self._meta_learner = None
+        self._active_strategy: str = ""    # set by compute(); used by _apply_penalties()
 
     def set_meta_learner(self, meta: MetaLearner):
         self._meta_learner = meta
 
     def compute(self, patterns, ml_predictions, enricher_data=None,
-                indicators=None, regime=None) -> FusionResult:
+                indicators=None, regime=None, strategy: str = "") -> FusionResult:
         """Compute fused signal from all components.
 
         Args:
@@ -56,6 +57,7 @@ class SignalFusion:
         Returns:
             FusionResult with direction and confidence (0-100)
         """
+        self._active_strategy = strategy   # stored for _apply_penalties
         # Step 1: Collect component scores
         components = self._collect_components(patterns, ml_predictions, enricher_data)
 
@@ -71,8 +73,9 @@ class SignalFusion:
         else:
             raw_score = self._static_weighted_score(components, regime)
 
-        # Step 4: Apply penalty filters
-        score = self._apply_penalties(raw_score, enricher_data, indicators)
+        # Step 4: Apply penalty filters (direction + strategy now influence ADX/RSI logic)
+        score = self._apply_penalties(raw_score, enricher_data, indicators,
+                                      direction=direction, strategy=self._active_strategy)
 
         return FusionResult(
             direction=direction,
@@ -120,10 +123,12 @@ class SignalFusion:
     _FORCED_BEARISH_PATTERNS = {
         "head_shoulders_top", "double_top", "triple_top", "rounding_top",
         "bearish_engulfing", "evening_star", "shooting_star", "hanging_man",
+        "rsi_bearish_divergence",          # momentum-fade → sell
     }
     _FORCED_BULLISH_PATTERNS = {
         "head_shoulders_bottom", "double_bottom", "triple_bottom", "rounding_bottom",
         "bullish_engulfing", "morning_star", "hammer", "inverted_head_shoulders",
+        "rsi_bullish_divergence",          # momentum-build → buy
     }
 
     def _vote_direction(self, patterns, ml_predictions) -> str:
@@ -200,45 +205,79 @@ class SignalFusion:
 
         return score * 100
 
-    def _apply_penalties(self, score, enricher_data, indicators):
+    def _apply_penalties(self, score, enricher_data, indicators,
+                         direction: str = "", strategy: str = ""):
         """Apply soft penalty filters to raw score.
-        These reduce confidence without hard-blocking — signals can still fire
-        but with lower confidence, letting the threshold decide.
-        """
-        # ADX penalty: trending strength
-        if indicators is not None and "adx" in indicators.columns and len(indicators) > 0:
-            adx_val = indicators["adx"].iloc[-1]
-            if adx_val == adx_val:  # not NaN
-                adx = float(adx_val)
-                if adx < 15:
-                    score *= 0.75    # Flat market — significant penalty
-                elif adx < 20:
-                    score *= 0.88    # Weak trend — mild penalty
-                # ADX >= 20: no penalty (good trend)
 
-        # Volume spike penalty: weak participation
+        Three categories:
+          A. ADX (strategy-aware)  — strength & direction alignment
+          B. RSI extreme levels    — overbought/oversold relative to trade direction
+          C. Volume + market context (unchanged)
+        """
+        if indicators is not None and len(indicators) > 0:
+            ind = indicators.iloc[-1]   # latest bar snapshot
+
+            # ── A. ADX penalty — strategy-aware ────────────────────────────
+            # TREND_FOLLOW / MOMENTUM want high ADX (weak ADX = weaker signal)
+            # MEAN_REVERSION wants LOW ADX  (high ADX = chasing a strong trend)
+            adx = float(ind.get("adx", float("nan")))
+            if adx == adx:   # not NaN
+                mean_rev = strategy in ("MEAN_REVERSION_BB",)
+                if mean_rev:
+                    # Mean-reversion strategies: penalise strong trends (ADX > 30)
+                    if adx > 35:
+                        score *= 0.80   # Very strong trend — avoid counter-trend
+                    elif adx > 30:
+                        score *= 0.90   # Moderate strong trend — mild caution
+                    # ADX ≤ 30: ideal choppy environment, no penalty
+                else:
+                    # Trend/breakout strategies: penalise flat markets
+                    if adx < 15:
+                        score *= 0.75   # Dead flat market
+                    elif adx < 20:
+                        score *= 0.88   # Weak trend — mild penalty
+                    # ADX ≥ 20: no penalty
+
+            # ── B. RSI extreme-level penalty ───────────────────────────────
+            # RSI divergence patterns are explicitly momentum-fade plays, so
+            # they are EXCLUDED from this penalty (divergence RELIES on extremes).
+            rsi = float(ind.get("rsi", float("nan")))
+            if rsi == rsi and direction:
+                dir_up = direction.upper() == "BUY"
+                # BUY into overbought: penalise late long entries
+                if dir_up and rsi > 80:
+                    score *= 0.80
+                    logger.debug(f"RSI OB penalty (RSI={rsi:.1f} > 80 on BUY): ×0.80")
+                elif dir_up and rsi > 75:
+                    score *= 0.90
+                    logger.debug(f"RSI OB penalty (RSI={rsi:.1f} > 75 on BUY): ×0.90")
+                # SELL into oversold: penalise late short entries
+                elif not dir_up and rsi < 20:
+                    score *= 0.80
+                    logger.debug(f"RSI OS penalty (RSI={rsi:.1f} < 20 on SELL): ×0.80")
+                elif not dir_up and rsi < 25:
+                    score *= 0.90
+                    logger.debug(f"RSI OS penalty (RSI={rsi:.1f} < 25 on SELL): ×0.90")
+
+        # ── C. Volume spike penalty ─────────────────────────────────────────
         if indicators is not None and len(indicators) >= 3:
             if "volume_spike" in indicators.columns:
                 recent_spikes = indicators["volume_spike"].iloc[-3:].sum()
                 if recent_spikes == 0:
-                    score *= 0.88   # No volume spike in last 3 bars — mild penalty
+                    score *= 0.88
             elif "volume" in indicators.columns:
-                # Compute vol ratio if volume_spike column missing
                 vol = indicators["volume"]
                 if len(vol) >= 20:
                     vol_avg = float(vol.iloc[-20:-1].mean()) if len(vol) >= 21 else float(vol.mean())
                     cur_vol = float(vol.iloc[-1])
                     if vol_avg > 0 and cur_vol < vol_avg * 0.8:
-                        score *= 0.88   # Below-average volume — mild penalty
+                        score *= 0.88
 
-        # Indian market penalties
+        # ── D. Indian market context ────────────────────────────────────────
         if enricher_data:
-            # Circuit proximity
             circuit_prox = enricher_data.get("circuit_proximity", 1.0)
             if circuit_prox < 0.05:
                 score *= 0.50
-
-            # Low delivery % (speculative/intraday — less reliable)
             delivery = enricher_data.get("delivery_pct", 40)
             if delivery < 20:
                 score *= 0.88

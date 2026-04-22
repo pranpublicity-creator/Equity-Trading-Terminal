@@ -265,13 +265,14 @@ class SignalEngine:
                 enricher_data=enricher_data,
             )
 
-        # 5. Fuse signals
+        # 5. Fuse signals (strategy passed so penalty layer can be strategy-aware)
         fusion_result = self.signal_fusion.compute(
             patterns=patterns,
             ml_predictions=ml_predictions,
             enricher_data=enricher_data,
             indicators=feature_df if len(feature_df) > 0 else None,
             regime=regime,
+            strategy=strategy,
         )
 
         # Always log scan result so we can see what's happening

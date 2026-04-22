@@ -649,3 +649,136 @@ def _has_extra_shoulders(all_swings, start_idx, pts):
         if any(s.type == pts[-1].type for s in post):
             return True
     return False
+
+
+# ─────────────────────────────────────────────────────────────
+# RSI Divergence (Patterns 9 & 10)
+# ─────────────────────────────────────────────────────────────
+
+def _compute_rsi_inline(close: pd.Series, period: int = 14) -> np.ndarray:
+    """Wilder's RSI computed inline — no TA-Lib dependency."""
+    delta = close.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1.0 / period, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1.0 / period, adjust=False).mean()
+    rs = gain / loss.replace(0, np.nan)
+    return (100 - (100 / (1 + rs))).values.astype(float)
+
+
+def detect_rsi_divergence(df: pd.DataFrame, swings: List[SwingPoint],
+                           lookback: int = 80) -> List[PatternResult]:
+    """Detect RSI Divergence — both bullish and bearish variants.
+
+    Bullish divergence:  price makes a LOWER LOW   while RSI makes a HIGHER LOW
+                         → downward momentum is fading; expect reversal up.
+
+    Bearish divergence:  price makes a HIGHER HIGH  while RSI makes a LOWER HIGH
+                         → upward momentum is fading; expect reversal down.
+
+    Confidence scales with:
+      • Size of RSI divergence (bigger gap → stronger signal)
+      • Magnitude of the price move (larger swing → more significant)
+
+    Only flags the signal when the *second* pivot is within the last 10 bars so
+    the detected divergence is actionable at the current bar.
+    """
+    results: List[PatternResult] = []
+    n = len(df)
+    if n < 30:
+        return results
+
+    close = df["close"]
+    # Prefer pre-computed RSI column; fall back to inline computation
+    rsi_vals: np.ndarray = (
+        df["rsi"].values.astype(float) if "rsi" in df.columns
+        else _compute_rsi_inline(close)
+    )
+    close_arr = close.values.astype(float)
+
+    recent = get_recent_swings(swings, n, lookback)
+    highs  = [s for s in recent if s.type == "HIGH"]
+    lows   = [s for s in recent if s.type == "LOW"]
+
+    # ── Bearish divergence: price HH + RSI LH ─────────────────
+    for i in range(len(highs) - 1):
+        h1, h2 = highs[i], highs[i + 1]   # h2 is the more recent high
+        if h1.index >= n or h2.index >= n:
+            continue
+        if n - 1 - h2.index > 10:          # second peak must be recent
+            continue
+        if h2.price <= h1.price * 1.001:   # must be a genuine new high
+            continue
+        rsi1, rsi2 = rsi_vals[h1.index], rsi_vals[h2.index]
+        if np.isnan(rsi1) or np.isnan(rsi2):
+            continue
+        if rsi2 >= rsi1:                   # no divergence
+            continue
+
+        price_gain_pct = (h2.price - h1.price) / h1.price * 100.0
+        rsi_drop       = rsi1 - rsi2
+        # Confidence: base 0.48, boosted by RSI gap (capped 20 pts) + price move
+        conf = min(0.85, 0.48
+                   + min(rsi_drop, 20.0) / 20.0 * 0.22
+                   + min(price_gain_pct, 3.0) / 3.0 * 0.15)
+
+        entry  = float(close_arr[-1])
+        sl     = round(h2.price * 1.008, 2)      # just above the recent high
+        risk   = max(sl - entry, entry * 0.005)
+        target = round(entry - risk * 1.8, 2)
+
+        results.append(PatternResult(
+            pattern_name="rsi_bearish_divergence",
+            variant=f"RSI-div {rsi_drop:.1f}pts",
+            direction="bearish",
+            confidence=round(conf, 3),
+            entry_price=round(entry, 2),
+            stop_loss=sl,
+            target_price=target,
+            neckline=round(h2.price, 2),
+            breakout_confirmed=True,
+            start_index=h1.index,
+            end_index=h2.index,
+            timeframe="15",
+        ))
+
+    # ── Bullish divergence: price LL + RSI HL ─────────────────
+    for i in range(len(lows) - 1):
+        l1, l2 = lows[i], lows[i + 1]     # l2 is the more recent low
+        if l1.index >= n or l2.index >= n:
+            continue
+        if n - 1 - l2.index > 10:          # second trough must be recent
+            continue
+        if l2.price >= l1.price * 0.999:   # must be a genuine new low
+            continue
+        rsi1, rsi2 = rsi_vals[l1.index], rsi_vals[l2.index]
+        if np.isnan(rsi1) or np.isnan(rsi2):
+            continue
+        if rsi2 <= rsi1:                   # no divergence
+            continue
+
+        price_drop_pct = (l1.price - l2.price) / l1.price * 100.0
+        rsi_rise       = rsi2 - rsi1
+        conf = min(0.85, 0.48
+                   + min(rsi_rise, 20.0) / 20.0 * 0.22
+                   + min(price_drop_pct, 3.0) / 3.0 * 0.15)
+
+        entry  = float(close_arr[-1])
+        sl     = round(l2.price * 0.992, 2)      # just below the recent low
+        risk   = max(entry - sl, entry * 0.005)
+        target = round(entry + risk * 1.8, 2)
+
+        results.append(PatternResult(
+            pattern_name="rsi_bullish_divergence",
+            variant=f"RSI-div {rsi_rise:.1f}pts",
+            direction="bullish",
+            confidence=round(conf, 3),
+            entry_price=round(entry, 2),
+            stop_loss=sl,
+            target_price=target,
+            neckline=round(l2.price, 2),
+            breakout_confirmed=True,
+            start_index=l1.index,
+            end_index=l2.index,
+            timeframe="15",
+        ))
+
+    return results

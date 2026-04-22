@@ -49,7 +49,7 @@ class PatternDetector:
 
         all_patterns = []
 
-        # --- Reversal patterns (8) ---
+        # --- Reversal patterns (8 classic + 2 RSI divergence) ---
         all_patterns.extend(reversal_patterns.detect_double_top(df, swings, lookback=100))
         all_patterns.extend(reversal_patterns.detect_double_bottom(df, swings, lookback=100))
         all_patterns.extend(reversal_patterns.detect_head_shoulders_top(df, swings, lookback=150))
@@ -58,6 +58,7 @@ class PatternDetector:
         all_patterns.extend(reversal_patterns.detect_triple_bottom(df, swings, lookback=120))
         all_patterns.extend(reversal_patterns.detect_rounding_top(df, swings, lookback=200))
         all_patterns.extend(reversal_patterns.detect_rounding_bottom(df, swings, lookback=200))
+        all_patterns.extend(reversal_patterns.detect_rsi_divergence(df, swings, lookback=80))
 
         # --- Continuation patterns (3) ---
         all_patterns.extend(continuation_patterns.detect_flag(df, swings, lookback=50))
