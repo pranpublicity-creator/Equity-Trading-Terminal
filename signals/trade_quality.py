@@ -10,14 +10,15 @@ and used by:
   • UI                           → badge on signal cards & chart modal
   • Report                       → post-hoc review ("why did we take this trade?")
 
-The six checks, ranked by importance:
+The seven checks, ranked by importance:
 
   1. Breakout freshness    — trigger→entry drift  (stale breakouts kill R:R)
-  2. Risk size              — ₹ SL distance as % of entry (prevents fake-tight SL)
-  3. R:R sanity             — ratio within [MIN_RR, MAX_RR] window
+  2. Risk size              — ₹ SL distance as % of entry; hard floor 0.15%, min 0.30%
+  3. R:R sanity             — ratio within [MIN_RR, MAX_RR]; catches tight-SL+high-RR artefacts
   4. SL on correct side     — stop beyond pattern-invalidation swing
   5. Regime fit             — pattern type vs current regime
-  6. ML alignment           — ≥ 2 of 5 models agree with direction
+  6. ML alignment           — magnitude-weighted; hard-fails on >70% contra-direction model
+  7. DI alignment           — DI+/DI− confirms trade direction
 
 Public API:
   score_signal(signal, pattern, regime, df=None) -> QualityReport
@@ -112,7 +113,12 @@ def _check_freshness(signal, pattern) -> QualityCheck:
 
 def _check_risk_size(signal) -> QualityCheck:
     """#2 — Risk per share as % of entry.  Guards against artificially
-    tight stops that inflate R:R."""
+    tight stops that inflate R:R.
+
+    Floors:
+      < 0.15% → absolute zero — tick noise will stop this out instantly
+      < MIN_RISK_PCT (0.30%) → too tight, likely SL calculation error
+    """
     entry = float(signal.entry_price or 0)
     sl    = float(signal.stop_loss or 0)
     if entry <= 0 or sl <= 0:
@@ -121,32 +127,45 @@ def _check_risk_size(signal) -> QualityCheck:
     risk_abs = abs(entry - sl)
     risk_pct = (risk_abs / entry) * 100.0
     min_pct  = config.TRADE_QUALITY_MIN_RISK_PCT
+    val      = f"₹{risk_abs:.2f} ({risk_pct:.2f}%)"
+
+    # Hard floor: below 0.15% is tick-noise territory — guaranteed stop-out
+    if risk_pct < 0.15:
+        return QualityCheck("risk_size", "Risk size", False, 0.0, val,
+                            f"SL effectively zero — {risk_pct:.2f}% is inside the spread; "
+                            f"will stop out on first tick")
     if risk_pct < min_pct:
-        return QualityCheck("risk_size", "Risk size", False, 0.2,
-                            f"₹{risk_abs:.2f} ({risk_pct:.2f}%)",
-                            f"SL too tight — {risk_pct:.2f}% < {min_pct}% min; "
-                            f"will likely stop on noise")
+        return QualityCheck("risk_size", "Risk size", False, 0.2, val,
+                            f"SL too tight — {risk_pct:.2f}% < {min_pct:.2f}% min; "
+                            f"will stop on normal intraday noise")
     if risk_pct < min_pct * 1.5:
-        return QualityCheck("risk_size", "Risk size", True, 0.6,
-                            f"₹{risk_abs:.2f} ({risk_pct:.2f}%)",
+        return QualityCheck("risk_size", "Risk size", True, 0.6, val,
                             "tight but acceptable")
     if risk_pct > 4.0:
-        return QualityCheck("risk_size", "Risk size", True, 0.6,
-                            f"₹{risk_abs:.2f} ({risk_pct:.2f}%)",
-                            "wide SL — size the position down")
-    return QualityCheck("risk_size", "Risk size", True, 1.0,
-                        f"₹{risk_abs:.2f} ({risk_pct:.2f}%)",
+        return QualityCheck("risk_size", "Risk size", True, 0.6, val,
+                            "wide SL — position size down accordingly")
+    return QualityCheck("risk_size", "Risk size", True, 1.0, val,
                         "healthy risk size")
 
 
 def _check_rr(signal) -> QualityCheck:
-    """#3 — R:R within sensible window.  Extremely high R:R is almost
-    always an artefact of a too-tight SL (Check #2 catches the cause, this
-    catches the symptom independently)."""
-    rr = float(getattr(signal, "risk_reward", 0) or 0)
+    """#3 — R:R within sensible window.
+
+    Two-part check:
+    A) Raw ratio vs [MIN_RR, MAX_RR] bounds.
+    B) Artefact guard: very high R:R (>5×) with an implausibly tight SL
+       (< MIN_RISK_PCT) is almost always a stop-calculation artefact where
+       the SL sits inside the noise band, not at a real invalidation level.
+       Example: TECHM SELL  entry=1390.50  SL=1394.04 (0.25%)  R:R=5.90×
+       → the SL is only ₹3.54 wide; any tick will stop this out.
+    """
+    rr     = float(getattr(signal, "risk_reward", 0) or 0)
+    entry  = float(signal.entry_price or 0)
+    sl     = float(signal.stop_loss   or 0)
     min_rr = config.TRADE_QUALITY_MIN_RR
     max_rr = config.TRADE_QUALITY_MAX_RR
-    val = f"{rr:.2f}×"
+    val    = f"{rr:.2f}×"
+
     if rr <= 0:
         return QualityCheck("rr", "R:R", False, 0.0, val, "R:R not computed")
     if rr < min_rr:
@@ -155,10 +174,26 @@ def _check_rr(signal) -> QualityCheck:
     if rr > max_rr:
         return QualityCheck("rr", "R:R", False, 0.2, val,
                             f"above {max_rr}× — suspiciously high; likely tight-SL artefact")
-    # Sweet spot 2-6×
-    if 2.0 <= rr <= 6.0:
+
+    # ── Artefact guard: high R:R + tight SL ──────────────────────────────────
+    if entry > 0 and sl > 0:
+        risk_pct = abs(entry - sl) / entry * 100.0
+        if rr > 5.0 and risk_pct < config.TRADE_QUALITY_MIN_RISK_PCT:
+            return QualityCheck(
+                "rr", "R:R", False, 0.20,
+                f"{val}  SL={risk_pct:.2f}%",
+                f"R:R {rr:.1f}× with SL only {risk_pct:.2f}% — "
+                f"tight-SL artefact; stop is inside tick noise, not a real level"
+            )
+
+    # Sweet spot 2–5×
+    if 2.0 <= rr <= 5.0:
         return QualityCheck("rr", "R:R", True, 1.0, val, "healthy risk/reward")
-    return QualityCheck("rr", "R:R", True, 0.8, val, "acceptable R:R")
+    # 5–6× acceptable but verify SL is real
+    if 5.0 < rr <= 6.0:
+        return QualityCheck("rr", "R:R", True, 0.75, val,
+                            "high R:R — double-check SL is at a real level")
+    return QualityCheck("rr", "R:R", True, 0.80, val, "acceptable R:R")
 
 
 def _check_sl_side(signal, pattern) -> QualityCheck:
@@ -337,9 +372,24 @@ def _check_di_alignment(signal, df) -> QualityCheck:
 
 
 def _check_ml_alignment(signal) -> QualityCheck:
-    """#6 — ML model agreement.
-    Counts how many of 5 models (LGB, XGB, LSTM, TFT, ARIMA) agree with
-    signal direction.  Requires ≥ 2 agreeing for a pass."""
+    """#6 — ML model agreement, magnitude-weighted with contradiction tiers.
+
+    Old approach (binary count) treated XGB=71% bullish on a SELL signal the
+    same as XGB=51% — both just "disagree".  That misses the key information:
+    a model with 71% conviction AGAINST the direction is a strong red flag.
+
+    New approach — directional score (ds) per model:
+      BUY:  ds = (p − 0.5) × 2   →  +1.0 if p=100%,  0 if p=50%, −1.0 if p=0%
+      SELL: ds = (0.5 − p) × 2   →  +1.0 if p=0%,    0 if p=50%, −1.0 if p=100%
+
+    Contradiction tiers (worst ds across all models):
+      ds < −0.40  (>70% against direction) → HARD FAIL, score ≤ 0.15
+      ds < −0.20  (>60% against direction) → MODERATE FAIL, score ≤ 0.30
+      ds ≥ −0.20                           → normal scoring from net_ds
+
+    Example — TECHM SELL: XGB=71% bullish → ds = (0.5−0.71)×2 = −0.42
+      → Tier 1 hard fail: score ≈ 0.12
+    """
     direction = (signal.direction or "").upper()
     lgb  = float(getattr(signal, "lgbm_prob", 0.5) or 0.5)
     xgb  = float(getattr(signal, "xgb_prob",  0.5) or 0.5)
@@ -347,48 +397,77 @@ def _check_ml_alignment(signal) -> QualityCheck:
     tft  = float(getattr(signal, "tft_prob",  0.5) or 0.5)
     arima_trend = (getattr(signal, "arima_trend", "FLAT") or "FLAT").upper()
 
-    def _votes(prob_thresh_high: float, prob_thresh_low: float):
-        """Count model votes agreeing with direction."""
-        agreeing, total, details = 0, 0, []
-        for name, p in [("LGB", lgb), ("XGB", xgb), ("LSTM", lstm), ("TFT", tft)]:
-            # Treat 0.5 as "no signal" — only count if model has a non-default value
-            if abs(p - 0.5) < 0.02:
-                details.append(f"{name}=n/a")
-                continue
-            total += 1
-            if direction == "BUY" and p >= prob_thresh_high:
-                agreeing += 1; details.append(f"{name}✓")
-            elif direction == "SELL" and p <= prob_thresh_low:
-                agreeing += 1; details.append(f"{name}✓")
-            else:
-                details.append(f"{name}✗")
-        # ARIMA vote
-        if arima_trend in ("UP", "DOWN"):
-            total += 1
-            if (direction == "BUY" and arima_trend == "UP") or \
-               (direction == "SELL" and arima_trend == "DOWN"):
-                agreeing += 1; details.append("ARIMA✓")
-            else:
-                details.append("ARIMA✗")
-        return agreeing, total, details
+    active, details = [], []
 
-    agreeing, total, details = _votes(0.55, 0.45)
-    val = f"{agreeing}/{total if total else 'n/a'}"
+    for name, p in [("LGB", lgb), ("XGB", xgb), ("LSTM", lstm), ("TFT", tft)]:
+        if abs(p - 0.5) < 0.03:          # ±3% from neutral → noise, skip
+            details.append(f"{name}=n/a")
+            continue
+        ds = (p - 0.5) * 2 if direction == "BUY" else (0.5 - p) * 2
+        active.append((name, p, ds))
+        details.append(f"{name}{'✓' if ds > 0 else '✗'}({p:.0%})")
 
-    if total == 0:
-        # No trained models returned strong signals either way
-        return QualityCheck("ml", "ML alignment", True, 0.5, val,
+    # ARIMA vote — binary, fixed ds ±0.60
+    if arima_trend in ("UP", "DOWN"):
+        arima_ok = (direction == "BUY"  and arima_trend == "UP") or \
+                   (direction == "SELL" and arima_trend == "DOWN")
+        arima_ds = 0.60 if arima_ok else -0.60
+        active.append(("ARIMA", None, arima_ds))
+        details.append(f"ARIMA({'✓' if arima_ok else '✗'})")
+
+    if not active:
+        return QualityCheck("ml", "ML alignment", True, 0.55, "n/a",
                             "no trained models have strong opinion (neutral)")
-    ratio = agreeing / total
+
+    net_ds   = sum(ds for _, _, ds in active) / len(active)
+    agreeing = sum(1 for _, _, ds in active if ds > 0)
+    total    = len(active)
+    worst    = min(active, key=lambda x: x[2])       # most negative = worst contra
+    wname, wprob, wds = worst
+    wval  = f"{wprob:.0%}" if wprob is not None else "–"
+
+    val        = f"{agreeing}/{total}  net={net_ds:+.2f}"
     detail_str = ", ".join(details)
-    if agreeing >= 2 and ratio >= 0.5:
-        return QualityCheck("ml", "ML alignment", True, min(1.0, 0.6 + 0.4 * ratio),
-                            val, f"{agreeing}/{total} models agree ({detail_str})")
-    if agreeing >= 1:
-        return QualityCheck("ml", "ML alignment", False, 0.3, val,
-                            f"only {agreeing}/{total} models agree ({detail_str})")
-    return QualityCheck("ml", "ML alignment", False, 0.0, val,
-                        f"no models agree ({detail_str})")
+
+    # ── Tier 1: HIGH-CONVICTION CONTRADICTION (>70% against direction) ────────
+    # ds < −0.40  ⟺  prob > 0.70 against direction
+    if wds < -0.40:
+        score = round(max(0.0, 0.10 + 0.15 * max(net_ds, 0)), 2)
+        return QualityCheck(
+            "ml", "ML alignment", False, score, val,
+            f"HIGH-CONVICTION CONTRADICTION — {wname} {wval} strongly opposes "
+            f"{direction} (ds={wds:+.2f}); models: {detail_str}"
+        )
+
+    # ── Tier 2: MODERATE CONTRADICTION (>60% against direction) ──────────────
+    # ds < −0.20  ⟺  prob > 0.60 against direction
+    if wds < -0.20:
+        score = round(max(0.10, 0.28 + 0.22 * max(net_ds, 0)), 2)
+        return QualityCheck(
+            "ml", "ML alignment", False, score, val,
+            f"CONTRADICTION — {wname} {wval} opposes {direction} "
+            f"(ds={wds:+.2f}); models: {detail_str}"
+        )
+
+    # ── Tier 3: Normal magnitude-weighted scoring ─────────────────────────────
+    if net_ds >= 0.30 and agreeing >= 2:
+        score = round(min(1.0, 0.65 + 0.35 * net_ds), 2)
+        return QualityCheck("ml", "ML alignment", True, score, val,
+                            f"Strong ML consensus — {detail_str}")
+
+    if net_ds >= 0.10:
+        score = round(min(0.80, 0.50 + 0.30 * net_ds), 2)
+        return QualityCheck("ml", "ML alignment", True, score, val,
+                            f"ML agrees with direction — {detail_str}")
+
+    if net_ds >= 0.0:
+        return QualityCheck("ml", "ML alignment", True, 0.45, val,
+                            f"Marginal ML agreement — {detail_str}")
+
+    # Net negative (more models against than for)
+    score = round(max(0.10, 0.35 + 0.25 * net_ds), 2)
+    return QualityCheck("ml", "ML alignment", False, score, val,
+                        f"ML net disagrees with {direction} — {detail_str}")
 
 
 # ── Aggregator ───────────────────────────────────────────────
