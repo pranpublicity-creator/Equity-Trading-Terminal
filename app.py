@@ -9,7 +9,7 @@ import os
 import sys
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO
@@ -115,6 +115,44 @@ commander.start()
 # State
 _poller_running = False
 _poller_thread = None
+
+# ── IST timezone (no pytz dependency) ───────────────────────────
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+def _now_ist() -> datetime:
+    return datetime.now(_IST)
+
+def _ist_hm() -> tuple:
+    """Return (hour, minute) in IST."""
+    n = _now_ist()
+    return n.hour, n.minute
+
+def _ist_time_str() -> str:
+    return _now_ist().strftime("%H:%M:%S IST")
+
+
+# ── Server-side activity log (survives browser refresh) ──────────
+_activity_log: list = []           # kept in memory; max 500 entries
+_ACTIVITY_LOG_MAX = 500
+
+def _srv_log(msg: str, log_type: str = "info", trade_ts: float = None):
+    """Append to server-side activity log and push to all connected clients."""
+    ts = trade_ts or time.time()
+    ist_str = datetime.fromtimestamp(ts, tz=_IST).strftime("%H:%M:%S")
+    entry = {"msg": msg, "type": log_type, "time": ist_str, "ts": ts}
+    _activity_log.append(entry)
+    if len(_activity_log) > _ACTIVITY_LOG_MAX:
+        _activity_log.pop(0)
+    try:
+        socketio.emit("activity_log_entry", entry)
+    except Exception:
+        pass
+
+
+# ── EOD auto-close state (server-side, reset each day) ───────────
+_eod_closed_today: bool = False
+_eod_last_reset_day: int = -1      # day-of-month when flag was last reset
+
 
 # ── Training Queue ──────────────────────────────────────────────
 import queue as _queue
@@ -564,6 +602,12 @@ def api_positions_cleanup():
                     "remaining": len(trade_engine.positions)})
 
 
+@app.route("/api/activity_log")
+def api_activity_log():
+    """Return last 200 server-side activity log entries (survives browser refresh)."""
+    return jsonify({"entries": _activity_log[-200:]})
+
+
 @app.route("/api/universe_symbols")
 def api_universe_symbols():
     """Return sorted list of all active symbols in current universe."""
@@ -834,6 +878,9 @@ def api_config_order_settings():
 def on_connect():
     logger.info("Client connected")
     socketio.emit("status", {"connected": True, "running": _poller_running})
+    # Replay server-side activity log so browser sees full history after refresh
+    if _activity_log:
+        socketio.emit("activity_log_replay", {"entries": _activity_log[-100:]})
 
 
 # ============================================================
@@ -860,6 +907,69 @@ def _watchdog_loop():
             socketio.emit("status", {"connected": True, "running": True, "auto_restarted": True})
 
 
+def _server_eod_close():
+    """SERVER-SIDE end-of-day close for all intraday (5-min) positions.
+
+    Runs every poller cycle.  Triggers at 15:25 IST regardless of whether
+    the browser is open.  Intraday SELL positions MUST NOT be held overnight
+    in NSE cash market — this is the safety net that enforces it.
+    """
+    global _eod_closed_today, _eod_last_reset_day
+
+    h, m   = _ist_hm()
+    today  = _now_ist().day
+
+    # Reset the flag each new calendar day
+    if today != _eod_last_reset_day:
+        _eod_closed_today   = False
+        _eod_last_reset_day = today
+
+    # Only act 15:25–16:30 IST
+    in_window = (h == 15 and m >= 25) or (h == 16 and m <= 30)
+    if not in_window or _eod_closed_today:
+        return
+
+    intraday = [
+        p for p in trade_engine.get_active_positions()
+        if getattr(p, "timeframe", "15") == "5"
+    ]
+
+    _eod_closed_today = True          # set before closing so we don't double-fire
+
+    if not intraday:
+        return
+
+    logger.warning(f"[EOD] Server auto-closing {len(intraday)} intraday position(s) at {_ist_time_str()}")
+    symbols_closed = []
+    for p in intraday:
+        try:
+            trade_engine.cancel_position(p.id)
+            ticker = (p.symbol or "").replace("NSE:", "").replace("-EQ", "")
+            logger.info(f"[EOD] Closed {p.direction} {ticker} @ entry ₹{p.entry_price:.2f}")
+            symbols_closed.append(ticker)
+            _srv_log(
+                f"[EOD AUTO-CLOSE] {p.direction} {ticker} closed at market (15:25 IST cutoff)",
+                "warning"
+            )
+        except Exception as e:
+            logger.error(f"[EOD] Failed to close {p.symbol}: {e}")
+
+    if symbols_closed:
+        socketio.emit("eod_auto_closed", {
+            "count":   len(symbols_closed),
+            "symbols": symbols_closed,
+            "time":    _ist_time_str(),
+        })
+        try:
+            telegram.send_message(
+                f"⚠️ EOD AUTO-CLOSE\n"
+                f"Closed {len(symbols_closed)} intraday position(s): {', '.join(symbols_closed)}\n"
+                f"Time: {_ist_time_str()}"
+            )
+        except Exception:
+            pass
+
+
 def _poller_loop():
     global _poller_running
 
@@ -873,6 +983,18 @@ def _poller_loop():
         try:
             cycle_start = time.time()
 
+            # ── Server-side EOD close (runs every cycle, idempotent) ─────────
+            _server_eod_close()
+
+            # ── Skip new-signal scanning outside market hours ─────────────────
+            # Positions are still updated for LTP/PnL; only signal generation
+            # is gated here.  Entry-gate in signal_engine does its own check,
+            # but this prevents wasting API quota on dead cycles.
+            _h, _m = _ist_hm()
+            _market_open  = (_h > 9 or (_h == 9 and _m >= 15))
+            _market_close = (_h > 15 or (_h == 15 and _m >= 35))
+            _scan_active  = _market_open and not _market_close
+
             # Refresh enricher data every 5 minutes
             if time.time() - enricher_refresh_time > 300:
                 try:
@@ -884,6 +1006,23 @@ def _poller_loop():
             # Throttle scanner when training is active — share API budget
             # Training uses ~3–5 API calls; scanner gets a smaller batch to avoid
             # hitting Fyers' server-side rate limit ("request limit reached")
+            # ── After-hours: skip scanning, just update open positions ──────
+            if not _scan_active:
+                if trade_engine.get_active_position_count() > 0:
+                    active_symbols = [p.symbol for p in trade_engine.get_active_positions()]
+                    try:
+                        quotes = {}
+                        for sym in active_symbols:
+                            q = fyers.get_equity_quote(sym)
+                            if q:
+                                quotes[sym] = q
+                        trade_engine.update_positions(quotes)
+                    except Exception as e:
+                        logger.error(f"After-hours position update error: {e}")
+                _emit_dashboard_update([], [])
+                time.sleep(15)     # poll slower after hours
+                continue
+
             effective_batch = max(3, config.BATCH_SIZE // 3) if _train_queue_running else config.BATCH_SIZE
 
             # Get next batch
@@ -981,6 +1120,20 @@ def _poller_loop():
 
                         # Process through trade engine
                         trade_engine.process_signal(signal)
+
+                        # ── Server-side activity log entry ────────────────────
+                        _ticker = symbol.replace("NSE:", "").replace("-EQ", "")
+                        _tf_lbl = "[5m]" if getattr(signal, "timeframe", "15") == "5" else "[15m]"
+                        _grade  = getattr(signal, "quality_grade", "")
+                        _srv_log(
+                            f"{_tf_lbl} {signal.direction} {_ticker} "
+                            f"@ ₹{signal.entry_price:.2f} | "
+                            f"conf {signal.confidence:.1f}% | "
+                            f"{signal.pattern_name or 'ML'} | "
+                            f"grade {_grade}",
+                            log_type="trade",
+                            trade_ts=getattr(signal, "timestamp", None),
+                        )
 
                         # Send Telegram alert
                         telegram.send_signal_alert(signal)

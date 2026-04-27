@@ -1660,7 +1660,13 @@ function renderActiveCards(positions){
         const ticker=(p.symbol||'').replace('NSE:','').replace('-EQ','');
         const ts=entryTs?_fmtTs(entryTs):'';
         const tfLabel=(p.timeframe==='5')?'[5m] ':'[15m] ';
-        addLog(`${tfLabel}${p.direction} ${ticker} @ ₹${(p.entry_price||0).toFixed(2)} | conf ${(p.signal_confidence||0).toFixed(1)}% | ${p.pattern_name||'signal'} | ${ts}`,'trade');
+        // Use IST trade timestamp (server time), not browser's new Date()
+        const istTime = entryTs
+          ? new Date(entryTs*1000).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Kolkata'})
+          : new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Kolkata'});
+        const logEntry={msg:`${tfLabel}${p.direction} ${ticker} @ ₹${(p.entry_price||0).toFixed(2)} | conf ${(p.signal_confidence||0).toFixed(1)}% | ${p.pattern_name||'signal'} | ${ts}`,type:'trade',time:istTime,ts:entryTs};
+        allLogs.push(logEntry); if(allLogs.length>_LOG_MAX) allLogs.shift();
+        if(logFilter==='all'||logFilter==='trade') _appendLogRow(logEntry);
         if(Notification.permission==='granted'){
           new Notification(`⚡ ${p.direction} ${ticker}`,{body:`Entry ₹${(p.entry_price||0).toFixed(2)} | ${p.pattern_name||''} | conf ${(p.signal_confidence||0).toFixed(1)}%`,icon:''});
         }
@@ -2946,13 +2952,54 @@ if('Notification' in window && Notification.permission==='default'){
   Notification.requestPermission();
 }
 
-// Restore today's logs from localStorage if available; only log "started" when empty
+// ── Server-side activity log integration ────────────────────────────────────
+// On connect the server pushes 'activity_log_replay' with up to 100 entries.
+// While connected it pushes 'activity_log_entry' for every new event.
+// This replaces the localStorage approach for trade/signal entries so the log
+// survives hard refresh, clears automatically each new trading day, and always
+// shows the TRADE timestamp (not the browser's current time).
+
+let _serverLogLoaded = false;
+
+socket.on('activity_log_replay', function(data){
+  if(_serverLogLoaded) return;   // only apply once per session
+  _serverLogLoaded = true;
+  const entries = data.entries || [];
+  if(!entries.length) return;
+  // Clear any locally-restored stale entries and replay from server
+  allLogs.length = 0;
+  const log = document.getElementById('activityLog');
+  if(log) log.innerHTML = '';
+  entries.forEach(e => _addServerLogEntry(e));
+  addLog('── Log restored from server ──','info');
+});
+
+socket.on('activity_log_entry', function(entry){
+  // Only add if not already shown (avoid duplicate when server replays on reconnect)
+  const alreadyShown = allLogs.some(e => e.ts === entry.ts && e.msg === entry.msg);
+  if(!alreadyShown) _addServerLogEntry(entry);
+});
+
+function _addServerLogEntry(e){
+  // Server entries carry IST time string — use directly, don't recompute
+  const mapped = _colorTypeMap[e.type] || 'info';
+  const entry = {msg: e.msg, type: mapped, time: e.time, ts: e.ts};
+  allLogs.push(entry);
+  if(allLogs.length > _LOG_MAX) allLogs.shift();
+  if(logFilter === 'all' || logFilter === mapped) _appendLogRow(entry);
+}
+
+// Restore today's logs from localStorage as fallback (covers training events etc.)
+// Server-side log covers trade/signal events; localStorage covers client-side events.
 const _hadOldLogs = _restoreLogs();
-if(_hadOldLogs){
-  addLog('── Session resumed (logs restored from earlier today) ──','info');
-}else{
+if(!_hadOldLogs){
   addLog('Equity Terminal started — waiting for market data…','info');
 }
+
+// ── EOD auto-close notification from server ──────────────────────────────────
+socket.on('eod_auto_closed', function(d){
+  addLog(`⚠️ EOD AUTO-CLOSE: ${d.count} intraday position(s) closed at ${d.time} — ${(d.symbols||[]).join(', ')}`, 'warning');
+});
 
 // ── Pattern Chart (TradingView Widget) ──────────────────────
 let _chartSymbol='', _chartRes='15', _chartSignalData={}, _tvWidget=null;
