@@ -3056,22 +3056,28 @@ async function _renderLightweightChart(symbol, signalData){
     return;
   }
 
+  // ── IST offset: Lightweight Charts treats all timestamps as UTC.
+  //    Fyers returns Unix UTC epoch seconds.  Adding +19800 (5h 30m)
+  //    makes the chart display IST labels instead of UTC. ───────────
+  const IST_OFF = 19800;
+  const ist = ts => Math.floor(Number(ts)) + IST_OFF;
+
   // Normalise candles → Lightweight Charts format { time, open, high, low, close }
   const candles = rawCandles.map(c=>({
-    time:  Number(c.time || c.timestamp),
+    time:  ist(c.time || c.timestamp),
     open:  Number(c.open),
     high:  Number(c.high),
     low:   Number(c.low),
     close: Number(c.close),
-  })).filter(c=>c.time>0).sort((a,b)=>a.time-b.time);
+  })).filter(c=>c.time>IST_OFF).sort((a,b)=>a.time-b.time);
   // Dedup by timestamp (in case of overlap)
   const seenT=new Set(); const uniq=[];
   for(const c of candles){ if(!seenT.has(c.time)){ seenT.add(c.time); uniq.push(c); } }
   const volume = rawCandles.map(c=>({
-    time:  Number(c.time||c.timestamp),
+    time:  ist(c.time||c.timestamp),
     value: Number(c.volume||0),
     color: Number(c.close)>=Number(c.open) ? 'rgba(16,185,129,0.45)' : 'rgba(239,68,68,0.45)',
-  })).filter(v=>v.time>0).sort((a,b)=>a.time-b.time);
+  })).filter(v=>v.time>IST_OFF).sort((a,b)=>a.time-b.time);
 
   // Pick the best pattern for overlay (highest confidence)
   let bestPattern = null;
@@ -3089,9 +3095,10 @@ async function _renderLightweightChart(symbol, signalData){
       stop_loss:  Number(bestPattern.stop_loss || 0),
       target:     Number(bestPattern.target_price || 0),
       neckline:   Number(bestPattern.neckline || 0),
-      swings:     (bestPattern.swings||[]).map(s=>({time:Number(s.time),price:Number(s.price),type:String(s.type||'HIGH').toUpperCase()})),
-      upper_line: (bestPattern.upper_line||[]).map(p=>({time:Number(p.time),price:Number(p.price)})),
-      lower_line: (bestPattern.lower_line||[]).map(p=>({time:Number(p.time),price:Number(p.price)})),
+      // Apply IST offset to all overlay timestamps
+      swings:     (bestPattern.swings||[]).map(s=>({time:ist(s.time),price:Number(s.price),type:String(s.type||'HIGH').toUpperCase()})),
+      upper_line: (bestPattern.upper_line||[]).map(p=>({time:ist(p.time),price:Number(p.price)})),
+      lower_line: (bestPattern.lower_line||[]).map(p=>({time:ist(p.time),price:Number(p.price)})),
       shape_type: bestPattern.shape_type || 'none',
     } : null,
   };

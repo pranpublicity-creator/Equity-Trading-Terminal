@@ -357,10 +357,22 @@ class SignalEngine:
             logger.info(f"[DEDUP] {symbol} suppressed — already fired {_sig_tuple} today")
             return None
 
+        # ── Swing-trade SHORT guard ───────────────────────────────────────────
+        # 15-minute signals are treated as swing trades that may carry overnight.
+        # SEBI/broker rules forbid holding short (naked SELL) equity positions
+        # overnight in the cash market.  Drop all SELL signals on the 15m TF.
+        _signal_tf = patterns[0].timeframe if patterns else config.CANDLE_RESOLUTION
+        if str(_signal_tf) == "15" and fusion_result.direction == "SELL":
+            logger.info(
+                f"[SWING-SHORT BLOCKED] {symbol} — SELL suppressed on 15m timeframe "
+                f"(overnight short not permitted in NSE cash market)"
+            )
+            return None
+
         # Build signal
         signal = TradeSignal(
             symbol=symbol,
-            timeframe=patterns[0].timeframe if patterns else config.CANDLE_RESOLUTION,
+            timeframe=_signal_tf,
             direction=fusion_result.direction,
             confidence=fusion_result.confidence,
             strength=fusion_result.strength,
