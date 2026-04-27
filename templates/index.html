@@ -401,9 +401,15 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
 
     <!-- TAB: Intraday Signals (5-min patterns) -->
     <div id="tab-intraday" style="flex:1;overflow-y:auto;padding:10px;display:none;" class="space-y-2">
-      <div class="flex items-center gap-2 mb-2">
+      <div class="flex items-center gap-2 mb-2 flex-wrap">
         <span class="text-[10px] font-semibold uppercase tracking-wider text-violet-400">5-min Intraday</span>
         <span class="text-[10px] text-slate-600">· ORB · VWAP Reclaim/Reject · ABCD · NR7 · Inside Bar</span>
+        <button id="forceCloseIntradayBtn" onclick="forceCloseAllIntraday()"
+          class="ml-auto px-3 py-1 rounded text-[10px] font-bold transition-colors hidden"
+          style="background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.4);"
+          title="Force-close all open intraday positions (NSE intraday cannot be held overnight)">
+          ✕ Force Close All Intraday
+        </button>
       </div>
       <div id="intraday-cards-container" class="space-y-2">
         <div class="text-center text-slate-600 text-sm py-10">No intraday signals yet — fires after ORB, VWAP, NR7 or Inside Bar setup completes</div>
@@ -1712,6 +1718,10 @@ function renderActiveCards(positions){
 
   _updateTabCountBadge('swingTabCount',    swingPos.length);
   _updateTabCountBadge('intradayTabCount', intradayPos.length);
+
+  // Show "Force Close All Intraday" button only when intraday positions exist
+  const fcBtn = document.getElementById('forceCloseIntradayBtn');
+  if(fcBtn) fcBtn.classList.toggle('hidden', intradayPos.length === 0);
 }
 
 function _updateTabCountBadge(id, n){
@@ -3726,6 +3736,48 @@ async function _eodAutoClose(){
 // Check EOD every 30 seconds
 setInterval(_checkEodTime, 30000);
 {% endif %}
+
+// ── Force Close All Intraday (manual trigger, works any time of day) ─────────
+async function forceCloseAllIntraday(){
+  const open = _pendingPositions.filter(
+    p => p.status === 'ACTIVE' && (p.timeframe||'15') === '5'
+  );
+  if(!open.length){
+    alert('No open intraday positions to close.');
+    return;
+  }
+  const names = open.map(p=>(p.symbol||'').replace('NSE:','').replace('-EQ','')).join(', ');
+  if(!confirm(`Force-close ${open.length} intraday position(s)?\n\n${names}\n\nThis will close at current market price and lock in P&L.`)) return;
+
+  const btn = document.getElementById('forceCloseIntradayBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Closing…'; }
+
+  try{
+    const resp = await fetch('/api/eod_force_close', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({timeframe:'5'}),
+    });
+    const d = await resp.json();
+    if(d.ok){
+      let summary = `✅ Force-closed ${d.closed} intraday position(s) at ${d.time}`;
+      let totalPnl = 0;
+      (d.details||[]).forEach(x=>{
+        totalPnl += x.pnl||0;
+        addLog(`  ⤷ ${x.direction} ${x.symbol} @ ₹${x.exit_price} → P&L ₹${x.pnl>=0?'+':''}${x.pnl.toFixed(2)}`,'trade');
+      });
+      addLog(`${summary} | Net P&L ₹${totalPnl>=0?'+':''}${totalPnl.toFixed(2)}`,'warning');
+    } else {
+      addLog('Force-close failed: '+(d.message||'unknown error'),'error');
+    }
+  } catch(e){
+    addLog('Force-close error: '+e.message,'error');
+  } finally{
+    await fetchPositions();
+    if(btn){ btn.disabled=false; btn.textContent='✕ Force Close All Intraday'; }
+    closeEodModal && closeEodModal();
+  }
+}
 </script>
 </body>
 </html>

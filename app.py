@@ -602,6 +602,55 @@ def api_positions_cleanup():
                     "remaining": len(trade_engine.positions)})
 
 
+@app.route("/api/eod_force_close", methods=["POST"])
+def api_eod_force_close():
+    """Force-close ALL active intraday (5-min) positions immediately.
+    Used when the normal 15:25 EOD window was missed (e.g. server restart).
+    """
+    data        = request.get_json(silent=True) or {}
+    target_tf   = data.get("timeframe", "5")          # default: intraday only
+    close_all   = data.get("close_all", False)         # True = close swing too
+
+    targets = [
+        p for p in trade_engine.get_active_positions()
+        if close_all or getattr(p, "timeframe", "15") == target_tf
+    ]
+
+    if not targets:
+        return jsonify({"ok": True, "closed": 0, "message": "No matching open positions"})
+
+    closed = []
+    now_ist = _ist_time_str()
+    for p in targets:
+        try:
+            ticker = (p.symbol or "").replace("NSE:", "").replace("-EQ", "")
+            trade_engine.cancel_position(p.id)
+            _srv_log(
+                f"[FORCE CLOSE] {p.direction} {ticker} closed @ ₹{p.current_price or p.entry_price:.2f}"
+                f" | P&L ₹{p.realized_pnl:.2f} | {now_ist}",
+                log_type="warning",
+            )
+            closed.append({
+                "symbol":  ticker,
+                "direction": p.direction,
+                "pnl":     round(p.realized_pnl, 2),
+                "exit_price": round(p.exit_price or p.entry_price, 2),
+            })
+            logger.info(f"FORCE CLOSE: {p.direction} {ticker} P&L={p.realized_pnl:.2f}")
+        except Exception as e:
+            logger.error(f"Force-close failed for {p.symbol}: {e}")
+
+    # Push updated dashboard immediately
+    _emit_dashboard_update([], [])
+
+    return jsonify({
+        "ok":      True,
+        "closed":  len(closed),
+        "details": closed,
+        "time":    now_ist,
+    })
+
+
 @app.route("/api/activity_log")
 def api_activity_log():
     """Return last 200 server-side activity log entries (survives browser refresh)."""
