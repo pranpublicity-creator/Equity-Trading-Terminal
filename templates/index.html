@@ -3205,89 +3205,193 @@ async function _renderLightweightChart(symbol, signalData){
 //   1. Upper AreaSeries fills DOWN from upper trendline with pattern colour
 //   2. Lower AreaSeries fills DOWN from lower trendline with opaque bg → erases
 //      the pattern colour below the lower trendline, leaving only the band.
+// ── Pattern shape overlay — two rendering strategies ─────────────────────────
+//
+// STRATEGY A  (Linear fill)   — triangle, wedge, rectangle, channel, flag
+//   • Uses backend upper_line + lower_line (linear-regression trendlines)
+//   • Stacked AreaSeries: upper fills DOWN in colour; lower fills DOWN in
+//     opaque background, creating a coloured band between the two lines.
+//
+// STRATEGY B  (Swing-point dome / bowl)  — H&S, rounding, double/triple top/
+//   bottom, cup, RSI divergence, and any curved / non-linear pattern
+//   • Connects actual swing HIGH points (bearish) or LOW points (bullish) in
+//     time order → produces the real dome or bowl shape on the chart.
+//   • Fills between that curve and the neckline level.
+//
+// Both strategies share the same legend update at the bottom.
+// ─────────────────────────────────────────────────────────────────────────────
 function _drawPatternShape(chart, pat){
   if(!chart || !pat) return;
 
-  const ul = (pat.upper_line||[]).filter(p=>p.time>0 && p.price>0);
-  const ll = (pat.lower_line||[]).filter(p=>p.time>0 && p.price>0);
-  if(ul.length < 2 && ll.length < 2) return;
+  const dir      = (pat.direction||'').toLowerCase();
+  const isBull   = dir==='bullish' || dir==='buy';
+  const lineClr  = isBull ? '#22d3ee' : '#f87171';
+  const fillRgb  = isBull ? '34,211,238' : '248,113,113';
+  const bgClr    = 'rgba(10,18,32,0.97)';   // must match chart bg #0a1220
+  const patName  = (pat.name||'').toLowerCase();
+  const shapeType= pat.shape_type || 'none';
 
-  const dir       = (pat.direction||'').toLowerCase();
-  const isBull    = dir==='bullish' || dir==='buy';
-  const lineClr   = isBull ? '#22d3ee' : '#f87171';
-  const fillRgb   = isBull ? '34,211,238' : '248,113,113';
-  const fillClr   = `rgba(${fillRgb},0.11)`;
-  const bgClr     = 'rgba(10,18,32,0.97)';   // must match chart bg #0a1220
-  const shapeType = pat.shape_type || 'none';
-
-  const seriesOpts = {
+  const SO = {                              // shared series options
     crosshairMarkerVisible: false,
     lastValueVisible:       false,
     priceLineVisible:       false,
   };
 
-  const SHAPED = ['triangle','rectangle','channel','wedge','hs'];
+  // All swing points in chronological order
+  const allSwings = (pat.swings||[])
+    .filter(s=>s.time>0 && s.price>0)
+    .sort((a,b)=>a.time-b.time);
+  const swingH = allSwings.filter(s=>s.type==='HIGH');
+  const swingL = allSwings.filter(s=>s.type==='LOW');
 
-  if(ul.length >= 2 && ll.length >= 2 && SHAPED.includes(shapeType)){
-    // ① Upper boundary → fills DOWN with pattern colour
+  // Pre-fitted trendlines from backend
+  const ul = (pat.upper_line||[]).filter(p=>p.time>0 && p.price>0);
+  const ll = (pat.lower_line||[]).filter(p=>p.time>0 && p.price>0);
+
+  // ── Decide which strategy to use ──────────────────────────────────────────
+  const LINEAR_SHAPES = ['triangle','rectangle','channel','wedge'];
+  const SWING_SHAPES  = ['hs'];   // + detected by pattern name below
+
+  const isLinear = LINEAR_SHAPES.includes(shapeType);
+  const isSwing  = SWING_SHAPES.includes(shapeType)
+    || ['rounding','head_shoulder','double','triple','cup','divergence','abcd']
+       .some(k=>patName.includes(k));
+
+  // ── STRATEGY A: Linear trendline fill ────────────────────────────────────
+  if(isLinear && ul.length>=2 && ll.length>=2){
     try{
-      const upperS = chart.addAreaSeries({
-        ...seriesOpts,
-        lineColor:   lineClr,
-        lineWidth:   1,
-        lineStyle:   LightweightCharts.LineStyle.Dashed,
-        topColor:    fillClr,
-        bottomColor: fillClr,
+      // Upper boundary → colour fill downward
+      const uS = chart.addAreaSeries({
+        ...SO, lineColor:lineClr, lineWidth:1,
+        lineStyle:LightweightCharts.LineStyle.Dashed,
+        topColor:`rgba(${fillRgb},0.13)`, bottomColor:`rgba(${fillRgb},0.13)`,
       });
-      upperS.setData(ul.map(p=>({time:p.time, value:p.price})));
-      _lwExtraSeries.push(upperS);
+      uS.setData(ul.map(p=>({time:p.time,value:p.price})));
+      _lwExtraSeries.push(uS);
 
-      // ② Lower boundary → fills DOWN with opaque bg to cut out area below
-      const lowerS = chart.addAreaSeries({
-        ...seriesOpts,
-        lineColor:   lineClr,
-        lineWidth:   1,
-        lineStyle:   LightweightCharts.LineStyle.Dashed,
-        topColor:    bgClr,
-        bottomColor: 'rgba(10,18,32,0)',
+      // Lower boundary → opaque bg fill downward (cuts colour below lower line)
+      const lS = chart.addAreaSeries({
+        ...SO, lineColor:lineClr, lineWidth:1,
+        lineStyle:LightweightCharts.LineStyle.Dashed,
+        topColor:bgClr, bottomColor:'rgba(10,18,32,0)',
       });
-      lowerS.setData(ll.map(p=>({time:p.time, value:p.price})));
-      _lwExtraSeries.push(lowerS);
-    }catch(e){ /* LW Charts version may not support AreaSeries – silent skip */ }
+      lS.setData(ll.map(p=>({time:p.time,value:p.price})));
+      _lwExtraSeries.push(lS);
+    }catch(e){}
 
-  } else {
-    // Fallback: just draw boundary lines without fill
-    const drawLine = (pts) => {
-      if(pts.length < 2) return;
+  // ── STRATEGY B: Swing-point dome / bowl ───────────────────────────────────
+  // Uses ACTUAL swing HIGH (dome) or LOW (bowl) points — gives the true
+  // curved shape for H&S, rounding top/bottom, double/triple tops etc.
+  } else if(isSwing || (!isLinear && (swingH.length>=2 || swingL.length>=2))){
+
+    // Bearish patterns → dome through swing HIGHs; bullish → bowl through LOWs
+    const mainPts = (isBull ? swingL : swingH)
+      .map(s=>({time:s.time, value:s.price}));
+
+    // neckline: explicit field → fallback to entry/trigger price so cut always fires
+    const neckline = Number(pat.neckline||0) || Number(pat.entry||0) || Number(pat.trigger||0);
+    const t0 = mainPts.length ? mainPts[0].time                 : 0;
+    const t1 = mainPts.length ? mainPts[mainPts.length-1].time  : 0;
+
+    if(mainPts.length>=2){
       try{
-        const s = chart.addLineSeries({
-          ...seriesOpts,
-          color:     lineClr,
-          lineWidth: 1,
-          lineStyle: LightweightCharts.LineStyle.Dashed,
+        if(!isBull){
+          // ── BEARISH: dome (swing HIGHs) is ABOVE the neckline ────────────────
+          // ① Dome curve fills DOWNWARD with colour
+          const curveS = chart.addAreaSeries({
+            ...SO, lineColor:lineClr, lineWidth:2,
+            lineStyle:LightweightCharts.LineStyle.Solid,
+            topColor:`rgba(${fillRgb},0.18)`, bottomColor:`rgba(${fillRgb},0.18)`,
+          });
+          curveS.setData(mainPts);
+          _lwExtraSeries.push(curveS);
+
+          // ② Neckline fills DOWNWARD with opaque bg → cuts colour below neckline
+          if(neckline>0 && t0 && t1){
+            const neckS = chart.addAreaSeries({
+              ...SO,
+              lineColor:`rgba(${fillRgb},0.9)`, lineWidth:1,
+              lineStyle:LightweightCharts.LineStyle.Dashed,
+              topColor:bgClr, bottomColor:'rgba(10,18,32,0)',
+            });
+            neckS.setData([{time:t0,value:neckline},{time:t1,value:neckline}]);
+            _lwExtraSeries.push(neckS);
+          }
+        } else {
+          // ── BULLISH: bowl (swing LOWs) is BELOW the neckline ─────────────────
+          // ① Neckline fills DOWNWARD with colour (colour spans neckline → bowl)
+          if(neckline>0 && t0 && t1){
+            const neckFill = chart.addAreaSeries({
+              ...SO,
+              lineColor:`rgba(${fillRgb},0.9)`, lineWidth:1,
+              lineStyle:LightweightCharts.LineStyle.Dashed,
+              topColor:`rgba(${fillRgb},0.18)`, bottomColor:`rgba(${fillRgb},0.18)`,
+            });
+            neckFill.setData([{time:t0,value:neckline},{time:t1,value:neckline}]);
+            _lwExtraSeries.push(neckFill);
+          }
+
+          // ② Bowl curve fills DOWNWARD with opaque bg → cuts colour below bowl
+          const curveS = chart.addAreaSeries({
+            ...SO, lineColor:lineClr, lineWidth:2,
+            lineStyle:LightweightCharts.LineStyle.Solid,
+            topColor:bgClr, bottomColor:'rgba(10,18,32,0)',
+          });
+          curveS.setData(mainPts);
+          _lwExtraSeries.push(curveS);
+        }
+      }catch(e){
+        // Ultra-safe fallback: plain line
+        try{
+          const ls=chart.addLineSeries({...SO,color:lineClr,lineWidth:2});
+          ls.setData(mainPts); _lwExtraSeries.push(ls);
+        }catch(_){}
+      }
+    }
+
+    // Also draw the opposite swings lightly (gives context, e.g. H&S valleys)
+    const sidePts = (isBull ? swingH : swingL)
+      .map(s=>({time:s.time, value:s.price}));
+    if(sidePts.length>=2){
+      try{
+        const sideS=chart.addLineSeries({
+          ...SO, color:`rgba(${fillRgb},0.35)`, lineWidth:1,
+          lineStyle:LightweightCharts.LineStyle.Dotted,
         });
-        s.setData(pts.map(p=>({time:p.time, value:p.price})));
+        sideS.setData(sidePts); _lwExtraSeries.push(sideS);
+      }catch(e){}
+    }
+
+  // ── Fallback: draw whatever trendlines we have ─────────────────────────────
+  } else {
+    [ul,ll].forEach(pts=>{
+      if(pts.length<2) return;
+      try{
+        const s=chart.addLineSeries({
+          ...SO, color:lineClr, lineWidth:1,
+          lineStyle:LightweightCharts.LineStyle.Dashed,
+        });
+        s.setData(pts.map(p=>({time:p.time,value:p.price})));
         _lwExtraSeries.push(s);
       }catch(e){}
-    };
-    drawLine(ul);
-    drawLine(ll);
+    });
   }
 
-  // Update the dedicated legend shape slot
+  // ── Legend slot update ─────────────────────────────────────────────────────
   const shapeEl  = document.getElementById('chartLegendShape');
   const shapeClr = document.getElementById('chartLegendShapeClr');
   const shapeLbl = document.getElementById('chartLegendShapeLbl');
   if(shapeEl && shapeLbl){
-    const lbl = shapeType && shapeType!=='none'
-      ? shapeType.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()) + ' Pattern'
+    const raw = patName || shapeType;
+    const lbl = raw && raw!=='none'
+      ? raw.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())
       : '';
     if(lbl){
-      if(shapeClr) shapeClr.style.color = lineClr;
-      shapeLbl.textContent = lbl;
-      shapeEl.style.display = '';
+      if(shapeClr) shapeClr.style.color=lineClr;
+      shapeLbl.textContent=lbl;
+      shapeEl.style.display='';
     } else {
-      shapeEl.style.display = 'none';
+      shapeEl.style.display='none';
     }
   }
 }

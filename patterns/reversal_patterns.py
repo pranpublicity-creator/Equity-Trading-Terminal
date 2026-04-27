@@ -526,14 +526,16 @@ def detect_rounding_top(df: pd.DataFrame, swings: List[SwingPoint], lookback: in
     confidence += 0.05 * min(len(highs) / 8, 1.0)
     confidence = min(confidence, 0.90)
 
+    lip_level = float(min(right_lip, left_lip))
     results.append(PatternResult(
         pattern_name="rounding_top",
         variant="standard",
         direction="bearish",
         confidence=confidence,
-        entry_price=min(right_lip, left_lip),
+        entry_price=lip_level,
         target_price=target,
         stop_loss=max(y) * 1.01,
+        neckline=lip_level,          # right/left lip = support/breakout level
         breakout_confirmed=breakout,
         start_index=highs[0].index,
         end_index=highs[-1].index,
@@ -598,6 +600,7 @@ def detect_rounding_bottom(df: pd.DataFrame, swings: List[SwingPoint], lookback:
         entry_price=lip,
         target_price=target,
         stop_loss=min(y) * 0.99,
+        neckline=float(lip),         # resistance lip = breakout level
         breakout_confirmed=breakout,
         start_index=lows[0].index,
         end_index=lows[-1].index,
