@@ -117,6 +117,9 @@ _poller_running = False
 _poller_thread = None
 _journal_refresh_ts: float = 0.0   # last time journal symbol cache was refreshed
 JOURNAL_CACHE_INTERVAL: int = 600  # refresh every 10 minutes
+# Telegram dedup — tracks (symbol, direction, round(entry,0)) already alerted
+# this session.  Belt-and-suspenders guard; primary fix is use_reloader=False.
+_telegram_sent: set = set()
 
 # ── IST timezone (no pytz dependency) ───────────────────────────
 _IST = timezone(timedelta(hours=5, minutes=30))
@@ -1253,8 +1256,18 @@ def _poller_loop():
                             trade_ts=getattr(signal, "timestamp", None),
                         )
 
-                        # Send Telegram alert
-                        telegram.send_signal_alert(signal)
+                        # Send Telegram alert (session-level dedup guard)
+                        _tg_key = (signal.symbol, signal.direction,
+                                   round(signal.entry_price, 0))
+                        if _tg_key not in _telegram_sent:
+                            _telegram_sent.add(_tg_key)
+                            telegram.send_signal_alert(signal)
+                        else:
+                            logger.info(
+                                f"[TG-DEDUP] Suppressed duplicate alert for "
+                                f"{signal.symbol} {signal.direction} "
+                                f"@ ₹{signal.entry_price:.0f}"
+                            )
 
                         # Prioritize this symbol for next scan
                         watchlist.prioritize(symbol)
@@ -1562,5 +1575,11 @@ if __name__ == "__main__":
     # Watchdog: silently restart poller if it ever crashes
     threading.Thread(target=_watchdog_loop, daemon=True).start()
 
+    # IMPORTANT: use_reloader=False prevents Flask from spawning a second
+    # process (the reloader child).  With debug=True AND the reloader ON,
+    # two independent _poller_loop threads run simultaneously — each with
+    # its own signal_engine instance and its own Telegram notifier — causing
+    # every alert to be sent twice.  Keeping use_reloader=False preserves
+    # the debug error-page / traceback output without the duplicate process.
     socketio.run(app, host=config.HOST, port=config.PORT, debug=config.DEBUG,
-                 allow_unsafe_werkzeug=True)
+                 use_reloader=False, allow_unsafe_werkzeug=True)

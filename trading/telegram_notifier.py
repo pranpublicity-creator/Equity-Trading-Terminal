@@ -7,12 +7,17 @@ import json
 import logging
 import os
 import threading
+import time
 
 import requests
 
 import config
 
 logger = logging.getLogger(__name__)
+
+# How long (seconds) to suppress a repeated (symbol, direction) alert.
+# Protects against any remaining duplicate-fire scenario within one process.
+_ALERT_DEDUP_SECS = 120
 
 
 class TelegramNotifier:
@@ -22,12 +27,32 @@ class TelegramNotifier:
         self.bot_token = config.TELEGRAM_BOT_TOKEN
         self.chat_id = config.TELEGRAM_CHAT_ID
         self._enabled = bool(self.bot_token and self.chat_id)
+        # Dedup: {f"{symbol}:{direction}": last_sent_timestamp}
+        self._last_alert: dict = {}
+        self._alert_lock = threading.Lock()
         self._load_config()
 
     def send_signal_alert(self, signal) -> bool:
         """Send a formatted trade signal alert."""
         if not self._enabled:
             return False
+
+        # ── Dedup guard (120-second window per symbol + direction) ────────────
+        # Catches duplicate calls within a single process (e.g. two code paths
+        # that both call send_signal_alert for the same signal).
+        _alert_key = f"{signal.symbol}:{signal.direction}"
+        _now = time.time()
+        with self._alert_lock:
+            _last = self._last_alert.get(_alert_key, 0)
+            if _now - _last < _ALERT_DEDUP_SECS:
+                logger.info(
+                    f"[TG-DEDUP] Suppressed duplicate signal alert "
+                    f"{signal.symbol} {signal.direction} "
+                    f"(last sent {int(_now - _last)}s ago)"
+                )
+                return False
+            self._last_alert[_alert_key] = _now
+        # ─────────────────────────────────────────────────────────────────────
 
         direction_emoji = "🟢" if signal.direction == "BUY" else "🔴"
         strength_map = {"STRONG": "⚡", "MODERATE": "💡", "WEAK": "📊"}
