@@ -35,17 +35,22 @@ class TelegramNotifier:
 
         ticker = signal.symbol.replace("NSE:", "").replace("-EQ", "")
 
+        # Timeframe label
+        tf_raw   = str(getattr(signal, "timeframe", "15"))
+        tf_label = "⚡ Intraday (5m)" if tf_raw == "5" else "📈 Swing (15m)"
+
         msg = (
             f"{direction_emoji} <b>{signal.direction} {ticker}</b> {strength_icon}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"📈 Entry: ₹{signal.entry_price:.2f}\n"
-            f"🛑 SL: ₹{signal.stop_loss:.2f}\n"
-            f"🎯 Target: ₹{signal.target_price:.2f}\n"
-            f"📊 R:R = {signal.risk_reward:.2f}\n"
+            f"⏱ Timeframe : {tf_label}\n"
+            f"📈 Entry    : ₹{signal.entry_price:.2f}\n"
+            f"🛑 SL       : ₹{signal.stop_loss:.2f}\n"
+            f"🎯 Target   : ₹{signal.target_price:.2f}\n"
+            f"📊 R:R      = {signal.risk_reward:.2f}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"🤖 Confidence: {signal.confidence:.1f}% ({signal.strength})\n"
-            f"📋 Pattern: {signal.pattern_name or 'ML-driven'}\n"
-            f"🏛 Regime: {signal.regime}\n"
+            f"📋 Pattern  : {signal.pattern_name or 'ML-driven'}\n"
+            f"🏛 Regime   : {signal.regime}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"LGB={signal.lgbm_prob:.2f} XGB={signal.xgb_prob:.2f} "
             f"LSTM={signal.lstm_prob:.2f} TFT={signal.tft_prob:.2f}\n"
@@ -60,12 +65,14 @@ class TelegramNotifier:
         if not self._enabled:
             return False
 
-        ticker = position.symbol.replace("NSE:", "").replace("-EQ", "")
+        ticker   = position.symbol.replace("NSE:", "").replace("-EQ", "")
         pnl_icon = "💰" if position.realized_pnl >= 0 else "💸"
+        tf_raw   = str(getattr(position, "timeframe", "15"))
+        tf_label = "⚡ Intraday (5m)" if tf_raw == "5" else "📈 Swing (15m)"
 
         msg = (
             f"{pnl_icon} <b>CLOSED: {ticker}</b>\n"
-            f"Direction: {position.direction}\n"
+            f"⏱ {tf_label} | {position.direction}\n"
             f"Entry: ₹{position.entry_price:.2f} → Exit: ₹{position.exit_price:.2f}\n"
             f"Reason: {position.exit_reason}\n"
             f"P&L: ₹{position.realized_pnl:+.2f} (charges: ₹{position.charges:.2f})"

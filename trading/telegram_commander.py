@@ -245,26 +245,55 @@ class TelegramCommander:
         if not positions:
             self._reply(chat_id, "📭 No active positions right now."); return
 
-        lines = [f"<b>📂 Active Positions ({len(positions)})</b>\n"]
-        total_pnl = 0.0
-        for p in positions:
+        # Split by timeframe
+        intraday = [p for p in positions if str(getattr(p, "timeframe", "15")) == "5"]
+        swing    = [p for p in positions if str(getattr(p, "timeframe", "15")) != "5"]
+
+        def _pos_block(p) -> str:
             ticker  = p.symbol.replace("NSE:", "").replace("-EQ", "")
             pnl     = float(getattr(p, "unrealized_pnl", 0) or 0)
-            total_pnl += pnl
             tgt     = float(getattr(p, "target", 0) or getattr(p, "target_price", 0) or 0)
             pattern = (getattr(p, "pattern_name", "") or "ML").replace("_", " ")
-            tf      = getattr(p, "timeframe", "15")
             d_icon  = "🟢" if p.direction == "BUY" else "🔴"
             p_icon  = "💚" if pnl >= 0 else "❤️"
-            lines.append(
-                f"{d_icon} <b>{p.direction} {ticker}</b> [{tf}m]  {p_icon} ₹{pnl:+.0f}\n"
+            return (
+                f"{d_icon} <b>{p.direction} {ticker}</b>  {p_icon} ₹{pnl:+.0f}\n"
                 f"   Entry ₹{p.entry_price:.2f} | SL ₹{p.stop_loss:.2f} | Tgt ₹{tgt:.2f}\n"
                 f"   Conf {getattr(p,'signal_confidence',0):.0f}% | {pattern}"
             )
-        lines.append(
-            f"\n━━━━━━━━━━━━━━━━━━\n"
-            f"{'💰' if total_pnl>=0 else '💸'} Total unrealised: ₹{total_pnl:+.0f}"
-        )
+
+        lines = [f"<b>📂 Active Positions ({len(positions)})</b>"]
+
+        # ── Intraday section ──────────────────────────────────────────────────
+        if intraday:
+            intra_pnl = sum(float(getattr(p, "unrealized_pnl", 0) or 0) for p in intraday)
+            lines.append(f"\n⚡ <b>Intraday (5m) — {len(intraday)} position(s)</b>")
+            lines.append("━━━━━━━━━━━━━━━━━━")
+            for p in intraday:
+                lines.append(_pos_block(p))
+            lines.append(
+                f"{'💚' if intra_pnl>=0 else '❤️'} Intraday P&L: ₹{intra_pnl:+.0f}"
+            )
+
+        # ── Swing section ─────────────────────────────────────────────────────
+        if swing:
+            swing_pnl = sum(float(getattr(p, "unrealized_pnl", 0) or 0) for p in swing)
+            lines.append(f"\n📈 <b>Swing (15m) — {len(swing)} position(s)</b>")
+            lines.append("━━━━━━━━━━━━━━━━━━")
+            for p in swing:
+                lines.append(_pos_block(p))
+            lines.append(
+                f"{'💚' if swing_pnl>=0 else '❤️'} Swing P&L: ₹{swing_pnl:+.0f}"
+            )
+
+        # ── Grand total ───────────────────────────────────────────────────────
+        total_pnl = sum(float(getattr(p, "unrealized_pnl", 0) or 0) for p in positions)
+        if intraday and swing:          # only show grand total when both sections exist
+            lines.append(
+                f"\n━━━━━━━━━━━━━━━━━━\n"
+                f"{'💰' if total_pnl>=0 else '💸'} <b>Total unrealised: ₹{total_pnl:+.0f}</b>"
+            )
+
         self._reply(chat_id, "\n".join(lines))
 
     # ── /pnl ──────────────────────────────────────────────────────────────────
