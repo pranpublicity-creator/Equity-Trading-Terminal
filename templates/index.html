@@ -2206,14 +2206,15 @@ function renderScannerTable(){
     let winCell='<span class="text-slate-700 text-xs">--</span>';
     let pfCell ='<span class="text-slate-700 text-xs">--</span>';
     let scoreCell='<span class="text-slate-700 text-xs">--</span>';
-    if(js && (js.trades||0)>=2){
+    const jsTrades = (js && (js.trades || js.total_trades || 0)) || 0;
+    if(js && jsTrades>=2){
       const wr  = js.win_rate        || 0;
       const pf  = js.profit_factor   || 0;
       const sc  = js.rank_score      || 0;
       const wrCl= wr>=60?'text-emerald-400':wr>=45?'text-amber-400':'text-red-400';
       const pfCl= pf>=1.5?'text-emerald-400':pf>=1.0?'text-amber-400':'text-red-400';
       const scCl= sc>=70?'text-emerald-400':sc>=45?'text-amber-400':'text-red-400';
-      const tip =`title="${js.trades} trades | SL suggest: ${(js.suggested_sl_pct||0).toFixed(2)}% | Sharpe: ${(js.sharpe||0).toFixed(2)}"`;
+      const tip =`title="${jsTrades} trades | SL suggest: ${(js.suggested_sl_pct||0).toFixed(2)}% | Sharpe: ${(js.sharpe||0).toFixed(2)}"`;
       winCell   =`<span class="num text-xs ${wrCl}" ${tip}>${wr.toFixed(0)}%</span>`;
       pfCell    =`<span class="num text-xs ${pfCl}" ${tip}>${pf.toFixed(2)}</span>`;
       scoreCell =`<span class="num text-xs font-bold ${scCl}" ${tip}>${sc.toFixed(0)}</span>`;

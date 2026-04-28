@@ -289,6 +289,22 @@ class JournalEngine:
         avg_mfe  = round(sum(getattr(p,"mfe_pct",0) for p in trades)/n, 2)
         avg_mae  = round(sum(getattr(p,"mae_pct",0) for p in trades)/n, 2)
 
+        # Best/worst single-trade excursion (for Excursion Analysis sheet)
+        best_mfe_pct  = round(max((getattr(p,"mfe_pct",0) for p in trades), default=0.0), 3)
+        worst_mae_pct = round(max((abs(getattr(p,"mae_pct",0)) for p in trades), default=0.0), 3)
+
+        # MFE capture: what fraction of the best run was captured at exit
+        mfe_caps = []
+        for p in trades:
+            mfe = getattr(p, "mfe_pct", 0) or 0
+            if mfe > 0.01:
+                ep = getattr(p, "entry_price", 0) or 0
+                xp = getattr(p, "exit_price",  0) or 0
+                if ep > 0:
+                    dir_pct = ((xp - ep)/ep*100) if getattr(p,"direction","") == "BUY" else ((ep - xp)/ep*100)
+                    mfe_caps.append(min(dir_pct / mfe, 1.0))
+        mfe_capture_pct = round(sum(mfe_caps)/len(mfe_caps)*100, 1) if mfe_caps else 0.0
+
         # Per-symbol Sharpe (if ≥2 trading days data)
         sym_daily: Dict[str, float] = defaultdict(float)
         for p in trades:
@@ -306,6 +322,7 @@ class JournalEngine:
         return {
             "symbol":          sym,
             "total_trades":    n,
+            "trades":          n,      # alias — scanner JS + report use this shorter key
             "win_rate":        wr,
             "profit_factor":   pf,
             "total_pnl":       round(sum(p.realized_pnl for p in trades), 2),
@@ -313,6 +330,9 @@ class JournalEngine:
             "avg_loss":        round(gl/len(losses), 2) if losses else 0.0,
             "avg_mfe_pct":     avg_mfe,
             "avg_mae_pct":     avg_mae,
+            "best_mfe_pct":    best_mfe_pct,
+            "worst_mae_pct":   worst_mae_pct,
+            "mfe_capture_pct": mfe_capture_pct,
             "mae_p50":         mae_p50,
             "mae_p80":         mae_p80,
             "suggested_sl_pct": suggested_sl,
