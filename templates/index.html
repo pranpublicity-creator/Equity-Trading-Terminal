@@ -440,11 +440,14 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
             <th class="px-3 py-2 scan-sort" data-col="10" data-type="text"  title="Last trained — click to sort">Trained <span class="sort-ind"></span></th>
             <th class="px-3 py-2 scan-sort" data-col="11" data-type="text"  title="Click to sort">ARIMA <span class="sort-ind"></span></th>
             <th class="px-3 py-2 scan-sort" data-col="12" data-type="num"   title="Click to sort">Vol/Avg <span class="sort-ind"></span></th>
+            <th class="px-3 py-2 scan-sort" data-col="13" data-type="num"   title="Historical win rate from Journal — click to sort">Win% <span class="sort-ind"></span></th>
+            <th class="px-3 py-2 scan-sort" data-col="14" data-type="num"   title="Profit Factor from Journal — click to sort">PF <span class="sort-ind"></span></th>
+            <th class="px-3 py-2 scan-sort" data-col="15" data-type="num"   title="Composite rank score (40% Sharpe + 30% Win Rate + 30% PF) — click to sort">Score <span class="sort-ind"></span></th>
             <th class="px-3 py-2">Action</th>
           </tr>
         </thead>
         <tbody id="scannerBody" class="divide-y divide-slate-900">
-          <tr><td colspan="14" class="text-center text-slate-600 py-8">No scans yet</td></tr>
+          <tr><td colspan="17" class="text-center text-slate-600 py-8">No scans yet</td></tr>
         </tbody>
       </table>
     </div>
@@ -2158,12 +2161,25 @@ function renderHeatmap(){
 
 // ── Scanner table ────────────────────────────────────────────
 const scannerRows={};
+// Per-symbol journal stats (keyed by clean ticker e.g. "RELIANCE")
+let _journalSymbolStats={};
+async function loadJournalSymbolStats(){
+  try{
+    const r=await fetch('/api/journal_symbol_stats');
+    const d=await r.json();
+    if(d.stats && typeof d.stats==='object'){
+      _journalSymbolStats=d.stats;
+      // Re-render scanner if visible
+      if(document.getElementById('tab-scanner').style.display!=='none') renderScannerTable();
+    }
+  }catch(e){console.warn('journal symbol stats load error:',e);}
+}
 function renderScannerTable(){
   const body=document.getElementById('scannerBody');if(!body)return;
   // Show all scanned stocks, sorted by confidence (highest first)
   const rows=Object.entries(scannerRows)
     .sort((a,b)=>(b[1].conf||0)-(a[1].conf||0));
-  if(!rows.length){body.innerHTML='<tr><td colspan="14" class="text-center text-slate-600 py-8">Waiting for scanner data\u2026</td></tr>';return;}
+  if(!rows.length){body.innerHTML='<tr><td colspan="17" class="text-center text-slate-600 py-8">Waiting for scanner data\u2026</td></tr>';return;}
   body.innerHTML=rows.map(([sym,d])=>{
     const ticker=sym.replace('NSE:','').replace('-EQ','');
     const conf=d.conf||0;
@@ -2185,6 +2201,24 @@ function renderScannerTable(){
     const xgbAcc = m ? `<span class="num ${xgbAccCol}">${m.xgb_acc}%</span>`  : '<span class="text-slate-700">--</span>';
     const trainedAt = m ? `<span class="text-slate-500 text-[10px]">${m.trained_at}</span>` : '<span class="text-slate-700">--</span>';
 
+    // Journal-sourced columns (Win%, PF, Score) — require ≥2 closed trades
+    const js = _journalSymbolStats[ticker] || _journalSymbolStats[ticker.toUpperCase()] || null;
+    let winCell='<span class="text-slate-700 text-xs">--</span>';
+    let pfCell ='<span class="text-slate-700 text-xs">--</span>';
+    let scoreCell='<span class="text-slate-700 text-xs">--</span>';
+    if(js && (js.trades||0)>=2){
+      const wr  = js.win_rate        || 0;
+      const pf  = js.profit_factor   || 0;
+      const sc  = js.rank_score      || 0;
+      const wrCl= wr>=60?'text-emerald-400':wr>=45?'text-amber-400':'text-red-400';
+      const pfCl= pf>=1.5?'text-emerald-400':pf>=1.0?'text-amber-400':'text-red-400';
+      const scCl= sc>=70?'text-emerald-400':sc>=45?'text-amber-400':'text-red-400';
+      const tip =`title="${js.trades} trades | SL suggest: ${(js.suggested_sl_pct||0).toFixed(2)}% | Sharpe: ${(js.sharpe||0).toFixed(2)}"`;
+      winCell   =`<span class="num text-xs ${wrCl}" ${tip}>${wr.toFixed(0)}%</span>`;
+      pfCell    =`<span class="num text-xs ${pfCl}" ${tip}>${pf.toFixed(2)}</span>`;
+      scoreCell =`<span class="num text-xs font-bold ${scCl}" ${tip}>${sc.toFixed(0)}</span>`;
+    }
+
     return `<tr class="hover:bg-slate-900/40 ${rowBg}">
       <td class="px-4 py-1.5 font-semibold text-slate-100">${ticker}</td>
       <td class="px-3 py-1.5 text-slate-400 text-center text-xs">${(d.pattern||'--').replace(/_/g,' ')}</td>
@@ -2199,6 +2233,9 @@ function renderScannerTable(){
       <td class="px-3 py-1.5 text-center">${trainedAt}</td>
       <td class="px-3 py-1.5 text-center text-slate-500 text-xs">${d.arima||'--'}</td>
       <td class="px-3 py-1.5 text-center ${volColor} num text-xs">${(d.vol_ratio||0).toFixed(1)}x</td>
+      <td class="px-3 py-1.5 text-center">${winCell}</td>
+      <td class="px-3 py-1.5 text-center">${pfCell}</td>
+      <td class="px-3 py-1.5 text-center">${scoreCell}</td>
       <td class="px-3 py-1.5 text-center">
         <div class="flex items-center justify-center gap-1">
         ${hasSignal?`<button onclick="openTradeModal('${sym}','${d.dir}',${d.ltp||0},0,0,${conf})"
@@ -2236,7 +2273,7 @@ function switchTab(name){
     const tabs=['swing','intraday','scanner','journal','heatmap'];
     b.classList.toggle('active', tabs[i]===name);
   });
-  if(name==='scanner') renderScannerTable();
+  if(name==='scanner'){ renderScannerTable(); loadJournalSymbolStats(); }
   if(name==='heatmap') renderHeatmap();
 }
 function switchBottomTab(name){

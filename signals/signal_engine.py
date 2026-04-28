@@ -22,6 +22,22 @@ from signals.trade_quality import score_signal as _score_quality
 logger = logging.getLogger(__name__)
 
 
+# ── Per-symbol journal stats cache ────────────────────────────────────────────
+# Keys: clean ticker e.g. "RELIANCE" (no "NSE:" prefix, no "-EQ" suffix).
+# Values: dict with win_rate, profit_factor, rank_score, trades, suggested_sl_pct
+# Populated by app.py every JOURNAL_CACHE_INTERVAL seconds (default 10 min).
+_journal_symbol_cache: dict = {}
+
+
+def update_journal_cache(stats_dict: dict) -> None:
+    """Called by app.py after each JournalEngine compute run.
+    stats_dict is keyed by clean ticker, each value is a symbol_stats dict.
+    """
+    global _journal_symbol_cache
+    _journal_symbol_cache = stats_dict or {}
+    logger.debug(f"[JOURNAL-CACHE] Updated {len(_journal_symbol_cache)} symbol stats")
+
+
 @dataclass
 class TradeSignal:
     """Complete trade signal with all component data."""
@@ -284,6 +300,33 @@ class SignalEngine:
             f"lgbm={lgbm_p} xgb={xgb_p} | "
             f"fusion={fusion_result.confidence:.1f} (threshold={config.SIGNAL_WEAK_THRESHOLD})"
         )
+
+        # ── Journal-based confidence adjustment ──────────────────────────────
+        # Use historical per-symbol performance to nudge the fusion confidence.
+        # Requires ≥5 closed trades on the symbol to avoid overfitting to noise.
+        #   rank_score < 40  →  reduce confidence (up to −15 pts)  poor history
+        #   rank_score > 70  →  boost  confidence (up to  +5 pts)  strong history
+        #   40 ≤ rank ≤ 70   →  no adjustment (neutral zone)
+        _clean_sym = symbol.replace("NSE:", "").replace("-EQ", "")
+        _jsym = _journal_symbol_cache.get(_clean_sym)
+        if _jsym and _jsym.get("trades", 0) >= 5:
+            _rank = float(_jsym.get("rank_score", 50))
+            if _rank < 40:
+                _adj = round((_rank - 40) / 40.0 * 15.0, 1)   # ≤ 0 (penalty)
+            elif _rank > 70:
+                _adj = round((_rank - 70) / 30.0 * 5.0,  1)   # ≥ 0 (bonus)
+            else:
+                _adj = 0.0
+            if _adj != 0.0:
+                _orig = fusion_result.confidence
+                fusion_result.confidence = round(
+                    max(0.0, min(100.0, fusion_result.confidence + _adj)), 1
+                )
+                _sign = "+" if _adj > 0 else ""
+                logger.info(
+                    f"[JOURNAL-ADJ] {_clean_sym} rank={_rank:.0f}/100 "
+                    f"→ conf {_orig:.1f}%→{fusion_result.confidence:.1f}% ({_sign}{_adj})"
+                )
 
         # Check minimum threshold
         if fusion_result.confidence < config.SIGNAL_WEAK_THRESHOLD:

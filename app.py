@@ -59,7 +59,7 @@ from features.feature_pipeline import FeaturePipeline
 from features.indicator_engine import compute_all
 from models.model_manager import ModelManager
 from models.model_trainer import ModelTrainer
-from signals.signal_engine import SignalEngine
+from signals.signal_engine import SignalEngine, update_journal_cache as _update_journal_cache
 from signals.regime_detector import detect_regime
 from adaptive.adaptive_bot import AdaptiveBot
 from adaptive.bayesian_selector import BayesianSelector
@@ -115,6 +115,8 @@ commander.start()
 # State
 _poller_running = False
 _poller_thread = None
+_journal_refresh_ts: float = 0.0   # last time journal symbol cache was refreshed
+JOURNAL_CACHE_INTERVAL: int = 600  # refresh every 10 minutes
 
 # ── IST timezone (no pytz dependency) ───────────────────────────
 _IST = timezone(timedelta(hours=5, minutes=30))
@@ -672,6 +674,33 @@ def api_journal_stats():
                         "symbol_stats": {}, "symbol_ranking": []})
 
 
+@app.route("/api/journal_symbol_stats")
+def api_journal_symbol_stats():
+    """Lightweight per-symbol performance dict — used by scanner tab.
+    Returns dict keyed by clean ticker: {win_rate, profit_factor, rank_score,
+    trades, suggested_sl_pct, total_pnl}.
+    Falls back to the in-memory cache when available (no recompute).
+    """
+    from signals.signal_engine import _journal_symbol_cache
+    if _journal_symbol_cache:
+        return jsonify({"stats": _journal_symbol_cache, "source": "cache"})
+    # Cache cold → compute now
+    try:
+        from trading.journal_engine import JournalEngine
+        je = JournalEngine(total_capital=config.TOTAL_TRADING_CAPITAL)
+        rpt = je.compute(trade_engine.closed_positions)
+        stats = {
+            row["symbol"]: row
+            for row in rpt.get("symbol_ranking", [])
+            if row.get("symbol")
+        }
+        _update_journal_cache(stats)
+        return jsonify({"stats": stats, "source": "computed"})
+    except Exception as e:
+        logger.error(f"journal_symbol_stats error: {e}", exc_info=True)
+        return jsonify({"stats": {}, "source": "error", "error": str(e)})
+
+
 @app.route("/api/activity_log")
 def api_activity_log():
     """Return last 200 server-side activity log entries (survives browser refresh)."""
@@ -1072,6 +1101,25 @@ def _poller_loop():
                     enricher_refresh_time = time.time()
                 except Exception as e:
                     logger.error(f"Enricher fetch failed: {e}")
+
+            # Refresh per-symbol journal stats every 10 minutes
+            global _journal_refresh_ts
+            if time.time() - _journal_refresh_ts > JOURNAL_CACHE_INTERVAL:
+                try:
+                    from trading.journal_engine import JournalEngine
+                    _je = JournalEngine(total_capital=config.TOTAL_TRADING_CAPITAL)
+                    _rpt = _je.compute(trade_engine.closed_positions)
+                    # Build dict keyed by clean ticker
+                    _cache = {
+                        row["symbol"]: row
+                        for row in _rpt.get("symbol_ranking", [])
+                        if row.get("symbol")
+                    }
+                    _update_journal_cache(_cache)
+                    _journal_refresh_ts = time.time()
+                    logger.info(f"[JOURNAL-CACHE] Refreshed {len(_cache)} symbol stats")
+                except Exception as e:
+                    logger.error(f"Journal cache refresh error: {e}")
 
             # Throttle scanner when training is active — share API budget
             # Training uses ~3–5 API calls; scanner gets a smaller batch to avoid
