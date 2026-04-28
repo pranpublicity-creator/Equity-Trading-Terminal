@@ -651,6 +651,27 @@ def api_eod_force_close():
     })
 
 
+@app.route("/api/journal_stats")
+def api_journal_stats():
+    """TradingView-style strategy performance report.
+    Computes: equity curve, drawdown, Sharpe, Sortino, CAGR, MAE/MFE,
+    profit factor, per-symbol breakdown, and suggested SL per symbol.
+    """
+    try:
+        from trading.journal_engine import JournalEngine
+        je     = JournalEngine(total_capital=config.TOTAL_TRADING_CAPITAL)
+        report = je.compute(trade_engine.closed_positions)
+        # Patch in live open count
+        if report.get("summary"):
+            report["summary"]["open_trades"] = len(trade_engine.get_active_positions())
+        return jsonify(report)
+    except Exception as e:
+        logger.error(f"journal_stats error: {e}", exc_info=True)
+        return jsonify({"error": str(e), "summary": {}, "detail": {},
+                        "equity_curve": [], "dd_curve": [],
+                        "symbol_stats": {}, "symbol_ranking": []})
+
+
 @app.route("/api/activity_log")
 def api_activity_log():
     """Return last 200 server-side activity log entries (survives browser refresh)."""

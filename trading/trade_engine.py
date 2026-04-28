@@ -53,6 +53,10 @@ class Position:
     quality_report: dict  = field(default_factory=dict)
     # ── Timeframe that generated this position ──────────────────
     timeframe: str = "15"          # "5" = intraday, "15" = swing
+    # ── Excursion tracking (updated every LTP tick) ─────────────
+    mfe_pct: float = 0.0           # Max Favourable Excursion % (best unrealised %)
+    mae_pct: float = 0.0           # Max Adverse  Excursion % (worst, stored as negative)
+    bars_in_trade: int = 0         # candle-bar counter (incremented on each quote update)
 
 
 class TradeEngine:
@@ -218,6 +222,17 @@ class TradeEngine:
                 pos.unrealized_pnl = (ltp - pos.entry_price) * pos.quantity
             else:
                 pos.unrealized_pnl = (pos.entry_price - ltp) * pos.quantity
+
+            # ── MAE / MFE tracking ──────────────────────────────
+            if pos.entry_price > 0:
+                raw_pct = (ltp - pos.entry_price) / pos.entry_price * 100.0
+                # For SELL, price falling = favourable; flip sign so direction-normalised
+                dir_pct = raw_pct if pos.direction == "BUY" else -raw_pct
+                # MFE = highest dir_pct seen (best moment of the trade)
+                pos.mfe_pct = round(max(pos.mfe_pct, dir_pct), 3)
+                # MAE = lowest dir_pct seen (worst moment, stored negative)
+                pos.mae_pct = round(min(pos.mae_pct, dir_pct), 3)
+            pos.bars_in_trade += 1     # rough bar count (≈ 3-s poll intervals)
 
             # Check trailing stop activation
             self._update_trailing_stop(pos)

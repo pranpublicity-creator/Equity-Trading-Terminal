@@ -371,6 +371,7 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
       <button class="tab-btn active" onclick="switchTab('swing')">Swing Signals <span id="swingTabCount" class="ml-1 px-1 py-0 rounded text-[9px] font-bold bg-slate-700/80 text-amber-400 hidden"></span></button>
       <button class="tab-btn" onclick="switchTab('intraday')">⚡ Intraday <span id="intradayTabCount" class="ml-1 px-1 py-0 rounded text-[9px] font-bold bg-slate-700/80 text-violet-400 hidden"></span></button>
       <button class="tab-btn" onclick="switchTab('scanner')">Scanner</button>
+      <button class="tab-btn" onclick="switchTab('journal');loadJournal()">📊 Journal</button>
       <button class="tab-btn" onclick="switchTab('heatmap')">Heatmap</button>
       <div class="ml-auto flex items-center gap-3 py-1">
         <span class="text-xs text-slate-500">Active: <span id="activeCount" class="text-emerald-400 font-semibold">0</span></span>
@@ -446,6 +447,73 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
           <tr><td colspan="14" class="text-center text-slate-600 py-8">No scans yet</td></tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- TAB: Trade Journal (TradingView-style Strategy Report) ─────────────── -->
+    <div id="tab-journal" style="flex:1;overflow-y:auto;padding:10px;display:none;">
+
+      <!-- Summary bar -->
+      <div id="journalSummaryBar" class="grid grid-cols-4 gap-2 mb-3"></div>
+
+      <!-- Equity chart -->
+      <div class="rounded-lg mb-3 overflow-hidden" style="background:#0c1829;border:1px solid #1e293b;">
+        <div class="flex items-center gap-3 px-3 py-2" style="border-bottom:1px solid #1e293b;">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Equity Curve</span>
+          <span id="journalChartLegEq"  class="text-[10px] text-emerald-400 hidden">● Equity</span>
+          <span id="journalChartLegDD"  class="text-[10px] text-red-400 hidden">● Drawdown</span>
+          <button onclick="loadJournal()" class="ml-auto text-[10px] text-slate-500 hover:text-slate-300 transition-colors">↻ Refresh</button>
+        </div>
+        <div id="journalChart" style="width:100%;height:200px;"></div>
+      </div>
+
+      <!-- Metrics table (mirrors TradingView Trades Analysis) -->
+      <div class="rounded-lg mb-3 overflow-hidden" style="background:#0c1829;border:1px solid #1e293b;">
+        <div class="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-400" style="border-bottom:1px solid #1e293b;">
+          Trades Analysis
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs" id="journalDetailTable">
+            <thead>
+              <tr style="background:#0a1220;">
+                <th class="text-left px-3 py-1.5 text-slate-500 font-semibold">Metric</th>
+                <th class="text-right px-3 py-1.5 text-slate-400 font-semibold">All</th>
+                <th class="text-right px-3 py-1.5 text-emerald-500 font-semibold">Long</th>
+                <th class="text-right px-3 py-1.5 text-red-400 font-semibold">Short</th>
+              </tr>
+            </thead>
+            <tbody id="journalDetailBody" class="divide-y divide-slate-800/50"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Per-symbol table -->
+      <div class="rounded-lg overflow-hidden" style="background:#0c1829;border:1px solid #1e293b;">
+        <div class="flex items-center gap-2 px-3 py-2" style="border-bottom:1px solid #1e293b;">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Per-Symbol Analytics</span>
+          <span class="text-[10px] text-slate-500">Rank = 40% Sharpe + 30% Win Rate + 30% Profit Factor</span>
+          <span class="text-[10px] text-amber-400 ml-2">⚡ Suggested SL from MAE 80th-pct of winning trades</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs" id="journalSymbolTable">
+            <thead>
+              <tr style="background:#0a1220;">
+                <th class="text-left  px-3 py-1.5 text-slate-500">Rank</th>
+                <th class="text-left  px-3 py-1.5 text-slate-500">Symbol</th>
+                <th class="text-right px-3 py-1.5 text-slate-500">Trades</th>
+                <th class="text-right px-3 py-1.5 text-slate-500">Win%</th>
+                <th class="text-right px-3 py-1.5 text-slate-500">PF</th>
+                <th class="text-right px-3 py-1.5 text-slate-500">Net P&L</th>
+                <th class="text-right px-3 py-1.5 text-slate-500">Avg MFE%</th>
+                <th class="text-right px-3 py-1.5 text-slate-500">Avg MAE%</th>
+                <th class="text-right px-3 py-1.5 text-amber-400">SL Suggest%</th>
+                <th class="text-right px-3 py-1.5 text-slate-500">Sharpe</th>
+                <th class="text-right px-3 py-1.5 text-slate-500">Score</th>
+              </tr>
+            </thead>
+            <tbody id="journalSymbolBody" class="divide-y divide-slate-800/50"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <!-- TAB: Confidence Heatmap -->
@@ -2159,18 +2227,17 @@ function updateScannerRow(sym, data){
 
 // ── Tab switching ─────────────────────────────────────────────
 function switchTab(name){
-  // 'swing' and 'intraday' use block layout; scanner uses flex (table); heatmap uses block
-  ['swing','intraday','scanner','heatmap'].forEach(t=>{
+  ['swing','intraday','scanner','journal','heatmap'].forEach(t=>{
     const el=document.getElementById('tab-'+t);
     if(!el)return;
     el.style.display= t===name ? (t==='scanner'?'flex':'block') : 'none';
   });
   document.querySelectorAll('.tab-btn').forEach((b,i)=>{
-    const tabs=['swing','intraday','scanner','heatmap'];
-    b.classList.toggle('active',tabs[i]===name);
+    const tabs=['swing','intraday','scanner','journal','heatmap'];
+    b.classList.toggle('active', tabs[i]===name);
   });
-  if(name==='scanner')renderScannerTable();
-  if(name==='heatmap')renderHeatmap();
+  if(name==='scanner') renderScannerTable();
+  if(name==='heatmap') renderHeatmap();
 }
 function switchBottomTab(name){
   // Show/hide panels — only 'main' and 'report' exist now
@@ -3736,6 +3803,183 @@ async function _eodAutoClose(){
 // Check EOD every 30 seconds
 setInterval(_checkEodTime, 30000);
 {% endif %}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JOURNAL TAB — TradingView-style Strategy Report
+// ─────────────────────────────────────────────────────────────────────────────
+let _journalChart = null;
+let _journalEqSeries = null;
+let _journalDDSeries = null;
+
+async function loadJournal(){
+  try{
+    const r = await fetch('/api/journal_stats');
+    const d = await r.json();
+    if(d.error){ console.warn('Journal error:',d.error); return; }
+    _renderJournalSummary(d.summary || {});
+    _renderJournalChart(d.equity_curve||[], d.dd_curve||[]);
+    _renderJournalDetail(d.detail || {});
+    _renderJournalSymbols(d.symbol_ranking || []);
+  }catch(e){ console.error('loadJournal:',e); }
+}
+
+function _renderJournalSummary(s){
+  const el = document.getElementById('journalSummaryBar');
+  if(!el) return;
+  const fmt = v => v===undefined||v===null ? '--' : (typeof v==='number'?v.toLocaleString('en-IN',{maximumFractionDigits:2}):v);
+  const pnlClr = (s.total_pnl||0)>=0 ? '#10b981' : '#ef4444';
+  const shClr  = (s.sharpe||0)>=1 ? '#10b981' : (s.sharpe||0)>=0 ? '#f59e0b' : '#ef4444';
+  const cards = [
+    {label:'Net P&L',      val:`₹${fmt(s.total_pnl)}`,        clr:pnlClr},
+    {label:'Profit Factor',val:fmt(s.profit_factor),           clr:(s.profit_factor||0)>=1.5?'#10b981':'#f59e0b'},
+    {label:'Win Rate',     val:`${fmt(s.win_rate)}%`,          clr:(s.win_rate||0)>=50?'#10b981':'#f59e0b'},
+    {label:'Max Drawdown', val:`₹${fmt(s.max_dd)}`,            clr:'#ef4444'},
+    {label:'Sharpe',       val:fmt(s.sharpe),                  clr:shClr},
+    {label:'Sortino',      val:fmt(s.sortino),                 clr:shClr},
+    {label:'CAGR',         val:`${fmt(s.cagr_pct)}%`,          clr:(s.cagr_pct||0)>0?'#10b981':'#ef4444'},
+    {label:'Trades',       val:`${s.total_trades||0} (${s.open_trades||0} open)`, clr:'#94a3b8'},
+    {label:'Avg MFE%',     val:`+${fmt(s.avg_mfe_pct)}%`,      clr:'#22d3ee'},
+    {label:'Avg MAE%',     val:`${fmt(s.avg_mae_pct)}%`,       clr:'#f87171'},
+    {label:'CAGR',         val:`${fmt(s.cagr_pct)}%`,          clr:'#a78bfa'},
+    {label:'Trading Days', val:fmt(s.trading_days),            clr:'#64748b'},
+  ];
+  // Show first 8
+  el.innerHTML = cards.slice(0,8).map(c=>`
+    <div class="rounded p-2 text-center" style="background:#0c1829;border:1px solid #1e293b;">
+      <div class="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">${c.label}</div>
+      <div class="text-sm font-bold" style="color:${c.clr};">${c.val}</div>
+    </div>`).join('');
+}
+
+function _renderJournalChart(eqCurve, ddCurve){
+  const host = document.getElementById('journalChart');
+  if(!host) return;
+  if(_journalChart){ try{_journalChart.remove();}catch(e){} _journalChart=null; }
+  if(!eqCurve.length) return;
+
+  _journalChart = LightweightCharts.createChart(host,{
+    layout:{background:{type:'solid',color:'#0c1829'},textColor:'#94a3b8',fontSize:10},
+    grid:{vertLines:{color:'rgba(51,65,85,0.2)'},horzLines:{color:'rgba(51,65,85,0.2)'}},
+    rightPriceScale:{borderColor:'#1e293b'},
+    timeScale:{borderColor:'#1e293b',timeVisible:true,secondsVisible:false},
+    crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
+    handleScroll:true, handleScale:true,
+  });
+
+  _journalEqSeries = _journalChart.addAreaSeries({
+    lineColor:'#10b981', lineWidth:2,
+    topColor:'rgba(16,185,129,0.20)', bottomColor:'rgba(16,185,129,0.02)',
+    lastValueVisible:true, priceLineVisible:false,
+  });
+  _journalEqSeries.setData(eqCurve);
+
+  _journalDDSeries = _journalChart.addAreaSeries({
+    lineColor:'#ef4444', lineWidth:1,
+    topColor:'rgba(239,68,68,0.02)', bottomColor:'rgba(239,68,68,0.18)',
+    lastValueVisible:false, priceLineVisible:false,
+  });
+  _journalDDSeries.setData(ddCurve);
+
+  _journalChart.timeScale().fitContent();
+  document.getElementById('journalChartLegEq').classList.remove('hidden');
+  document.getElementById('journalChartLegDD').classList.remove('hidden');
+
+  // Auto-resize
+  new ResizeObserver(()=>{
+    if(_journalChart&&host) _journalChart.applyOptions({width:host.clientWidth});
+  }).observe(host);
+}
+
+function _renderJournalDetail(detail){
+  const tbody = document.getElementById('journalDetailBody');
+  if(!tbody) return;
+  const a=detail.all||{}, lo=detail.long||{}, sh=detail.short||{};
+
+  const rows = [
+    ['Total trades',          a.total,           lo.total,          sh.total,         false],
+    ['Winning trades',        a.winning,          lo.winning,        sh.winning,       false],
+    ['Losing trades',         a.losing,           lo.losing,         sh.losing,        false],
+    ['% Profitable',          pct(a.pct_profitable), pct(lo.pct_profitable), pct(sh.pct_profitable), true],
+    ['Avg P&L',               inr(a.avg_pnl_abs), inr(lo.avg_pnl_abs), inr(sh.avg_pnl_abs), true],
+    ['Avg P&L %',             pct(a.avg_pnl_pct), pct(lo.avg_pnl_pct), pct(sh.avg_pnl_pct), true],
+    ['Avg winning trade',     inr(a.avg_win_abs), inr(lo.avg_win_abs), inr(sh.avg_win_abs), false],
+    ['Avg winning trade %',   pct(a.avg_win_pct), pct(lo.avg_win_pct), pct(sh.avg_win_pct), false],
+    ['Avg losing trade',      inr(a.avg_loss_abs),inr(lo.avg_loss_abs),inr(sh.avg_loss_abs),false],
+    ['Avg losing trade %',    pct(a.avg_loss_pct),pct(lo.avg_loss_pct),pct(sh.avg_loss_pct),false],
+    ['Ratio avg win/loss',    a.ratio_win_loss,   lo.ratio_win_loss,  sh.ratio_win_loss,  false],
+    ['Profit factor',         a.profit_factor,    lo.profit_factor,   sh.profit_factor,   false],
+    ['Largest winning trade', inr(a.largest_win_abs), inr(lo.largest_win_abs), inr(sh.largest_win_abs), false],
+    ['Largest win %',         pct(a.largest_win_pct), pct(lo.largest_win_pct), pct(sh.largest_win_pct), false],
+    ['Largest win of gross',  pct(a.largest_win_of_gross), pct(lo.largest_win_of_gross), pct(sh.largest_win_of_gross), false],
+    ['Largest losing trade',  inr(a.largest_loss_abs),inr(lo.largest_loss_abs),inr(sh.largest_loss_abs),false],
+    ['Largest loss %',        pct(a.largest_loss_pct),pct(lo.largest_loss_pct),pct(sh.largest_loss_pct),false],
+    ['Largest loss of gross', pct(a.largest_loss_of_gross),pct(lo.largest_loss_of_gross),pct(sh.largest_loss_of_gross),false],
+    ['Avg bars in trade',     a.avg_bars,         lo.avg_bars,        sh.avg_bars,       false],
+    ['Avg bars — winning',    a.avg_bars_winning, lo.avg_bars_winning,sh.avg_bars_winning,false],
+    ['Avg bars — losing',     a.avg_bars_losing,  lo.avg_bars_losing, sh.avg_bars_losing, false],
+    ['──── Excursion ────',   '',                  '',                 '',                false],
+    ['Avg MFE %',             pct(a.avg_mfe_pct), pct(lo.avg_mfe_pct),pct(sh.avg_mfe_pct), false],
+    ['Avg MAE %',             pct(a.avg_mae_pct), pct(lo.avg_mae_pct),pct(sh.avg_mae_pct), false],
+    ['MFE Capture %',         pct(a.mfe_capture_pct),pct(lo.mfe_capture_pct),pct(sh.mfe_capture_pct),false],
+  ];
+
+  function inr(v){ return v!=null ? '₹'+Number(v).toLocaleString('en-IN',{maximumFractionDigits:2}) : '--'; }
+  function pct(v){ return v!=null ? Number(v).toFixed(2)+'%' : '--'; }
+  function colorCell(raw, isPositiveGood){
+    if(raw==null||raw==='') return 'color:#64748b;';
+    const n=parseFloat(raw);
+    if(isNaN(n)) return '';
+    if(!isPositiveGood) return '';
+    return n>0?'color:#10b981;':n<0?'color:#ef4444;':'';
+  }
+
+  tbody.innerHTML = rows.map(([label,av,lv,sv,colorize])=>{
+    if(av===''&&lv===''&&sv==='') return `<tr><td colspan="4" class="px-3 py-1 text-[9px] text-slate-600 font-semibold uppercase tracking-wider">${label}</td></tr>`;
+    return `<tr class="hover:bg-slate-800/20 transition-colors">
+      <td class="px-3 py-1 text-slate-400">${label}</td>
+      <td class="px-3 py-1 text-right font-mono" style="${colorize?colorCell(parseFloat(av)||0,true):''}">${av??'--'}</td>
+      <td class="px-3 py-1 text-right font-mono text-emerald-400/80">${lv??'--'}</td>
+      <td class="px-3 py-1 text-right font-mono text-red-400/80">${sv??'--'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function _renderJournalSymbols(ranking){
+  const tbody = document.getElementById('journalSymbolBody');
+  if(!tbody) return;
+  if(!ranking.length){
+    tbody.innerHTML='<tr><td colspan="11" class="text-center text-slate-600 py-6 text-sm">No trade history yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = ranking.map((s,i)=>{
+    const wr   = (s.win_rate||0);
+    const wrClr= wr>=60?'#10b981':wr>=45?'#f59e0b':'#ef4444';
+    const pf   = (s.profit_factor||0);
+    const pfClr= pf>=1.5?'#10b981':pf>=1.0?'#f59e0b':'#ef4444';
+    const sc   = (s.rank_score||0);
+    const scClr= sc>=60?'#10b981':sc>=40?'#f59e0b':'#ef4444';
+    const pnl  = (s.total_pnl||0);
+    const pnlClr=pnl>=0?'#10b981':'#ef4444';
+    const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+    const sl   = s.suggested_sl_pct;
+    const slCell = sl!=null
+      ? `<span style="color:${sl<0.3?'#ef4444':sl<0.5?'#f59e0b':'#22d3ee'};">${sl.toFixed(2)}%</span>`
+      : '<span class="text-slate-600">—</span>';
+    return `<tr class="hover:bg-slate-800/20 transition-colors">
+      <td class="px-3 py-1.5 text-slate-400">${medal} ${i+1}</td>
+      <td class="px-3 py-1.5 font-semibold text-slate-200">${s.symbol}</td>
+      <td class="px-3 py-1.5 text-right text-slate-400">${s.total_trades}</td>
+      <td class="px-3 py-1.5 text-right font-bold" style="color:${wrClr};">${wr.toFixed(1)}%</td>
+      <td class="px-3 py-1.5 text-right font-bold" style="color:${pfClr};">${pf.toFixed(2)}</td>
+      <td class="px-3 py-1.5 text-right font-bold" style="color:${pnlClr};">₹${Math.abs(pnl).toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
+      <td class="px-3 py-1.5 text-right text-cyan-400">+${(s.avg_mfe_pct||0).toFixed(2)}%</td>
+      <td class="px-3 py-1.5 text-right text-red-400">${(s.avg_mae_pct||0).toFixed(2)}%</td>
+      <td class="px-3 py-1.5 text-right">${slCell}</td>
+      <td class="px-3 py-1.5 text-right text-slate-300">${(s.sharpe||0).toFixed(2)}</td>
+      <td class="px-3 py-1.5 text-right font-bold" style="color:${scClr};">${sc.toFixed(0)}</td>
+    </tr>`;
+  }).join('');
+}
 
 // ── Force Close All Intraday (manual trigger, works any time of day) ─────────
 async function forceCloseAllIntraday(){
