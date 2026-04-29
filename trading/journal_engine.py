@@ -342,6 +342,144 @@ class JournalEngine:
             "sl_too_tight":    (suggested_sl is not None and suggested_sl > 0.30),
         }
 
+    # ── Single-symbol drill-down ──────────────────────────────────────────────
+
+    def compute_symbol(self, symbol: str, closed_positions: List) -> dict:
+        """Full journal analytics for ONE symbol — powers the popup modal.
+
+        Args:
+            symbol : clean ticker e.g. 'KOTAKBANK' (no NSE: / -EQ prefix)
+            closed_positions : trade_engine.closed_positions (all symbols)
+
+        Returns dict with keys:
+            summary, detail (all/long/short), equity_curve, dd_curve, trade_log
+        """
+        # Filter to this symbol only
+        sym_clean = symbol.replace("NSE:", "").replace("-EQ", "")
+        trades = [
+            p for p in closed_positions
+            if getattr(p, "status", "") == "CLOSED"
+            and (p.symbol or "").replace("NSE:", "").replace("-EQ", "") == sym_clean
+        ]
+
+        if not trades:
+            return self._empty_symbol(sym_clean)
+
+        cap  = self.total_capital
+        cs   = sorted(trades, key=lambda p: p.exit_time or 0)
+        wins = [p for p in trades if p.realized_pnl > 0]
+
+        # ── Per-symbol equity + drawdown curves ──────────────────────────────
+        eq_curve, dd_curve = [], []
+        cum, peak, max_dd = 0.0, 0.0, 0.0
+        for p in cs:
+            cum   += p.realized_pnl
+            peak   = max(peak, cum)
+            dd     = peak - cum
+            max_dd = max(max_dd, dd)
+            ts     = int(p.exit_time or 0) + IST_OFF
+            eq_curve.append({"time": ts, "value": round(cum,  2)})
+            dd_curve.append({"time": ts, "value": round(-dd,  2)})
+
+        # ── Sharpe / Sortino (daily %) ────────────────────────────────────────
+        daily: Dict[str, float] = defaultdict(float)
+        for p in cs:
+            if p.exit_time:
+                daily[_ist_date(p.exit_time)] += p.realized_pnl
+        daily_pct = [v / cap * 100.0 for v in daily.values()]
+        sharpe    = _sharpe(daily_pct)
+        sortino   = _sortino(daily_pct)
+
+        # ── CAGR ─────────────────────────────────────────────────────────────
+        t0    = cs[0].entry_time or cs[0].exit_time or 0
+        t1    = cs[-1].exit_time or 0
+        n_days = max(1, int((t1 - t0) / 86400))
+        total_pnl = sum(p.realized_pnl for p in trades)
+        cagr  = _cagr(cap, total_pnl, n_days)
+
+        # ── Per-symbol stats dict ─────────────────────────────────────────────
+        stats = self._symbol_stats(sym_clean, trades, cap)
+
+        # ── Trades Analysis (All / Long / Short) ─────────────────────────────
+        longs  = [p for p in trades if p.direction == "BUY"]
+        shorts = [p for p in trades if p.direction == "SELL"]
+        detail = {
+            "all":   self._detail(trades),
+            "long":  self._detail(longs),
+            "short": self._detail(shorts),
+        }
+
+        # ── Trade log (one dict per closed trade) ────────────────────────────
+        trade_log = []
+        for p in cs:
+            ep  = getattr(p, "entry_price",  0) or 0
+            xp  = getattr(p, "exit_price",   0) or 0
+            qty = getattr(p, "quantity",      0) or 0
+            cap_deployed = ep * qty
+            pnl_pct = round(p.realized_pnl / cap_deployed * 100.0, 2) if cap_deployed > 0 else 0.0
+            tf_raw  = str(getattr(p, "timeframe", "15"))
+            tf_lbl  = "Intraday" if tf_raw == "5" else "Swing"
+            entry_dt = datetime.fromtimestamp(p.entry_time, tz=IST).strftime("%d %b %y %H:%M") if p.entry_time else "—"
+            exit_dt  = datetime.fromtimestamp(p.exit_time,  tz=IST).strftime("%d %b %y %H:%M") if p.exit_time  else "—"
+            trade_log.append({
+                "entry_date":    entry_dt,
+                "exit_date":     exit_dt,
+                "timeframe":     tf_lbl,
+                "direction":     p.direction,
+                "entry_price":   round(ep, 2),
+                "exit_price":    round(xp, 2),
+                "quantity":      int(qty),
+                "pnl":           round(p.realized_pnl, 2),
+                "pnl_pct":       pnl_pct,
+                "mae_pct":       round(getattr(p, "mae_pct", 0) or 0, 3),
+                "mfe_pct":       round(getattr(p, "mfe_pct", 0) or 0, 3),
+                "bars":          int(getattr(p, "bars_in_trade", 0) or 0),
+                "grade":         getattr(p, "quality_grade", "—") or "—",
+                "pattern":       (getattr(p, "pattern_name", "") or "ML").replace("_", " "),
+                "exit_reason":   (getattr(p, "exit_reason", "") or "—").replace("_", " "),
+                "charges":       round(getattr(p, "charges", 0) or 0, 2),
+            })
+
+        # ── Summary card ─────────────────────────────────────────────────────
+        summary = {
+            "symbol":          sym_clean,
+            "total_trades":    len(trades),
+            "winning":         len(wins),
+            "losing":          len(trades) - len(wins),
+            "win_rate":        stats["win_rate"],
+            "profit_factor":   stats["profit_factor"],
+            "total_pnl":       round(total_pnl, 2),
+            "max_dd":          round(max_dd, 2),
+            "sharpe":          sharpe,
+            "sortino":         sortino,
+            "cagr_pct":        cagr,
+            "avg_mfe_pct":     stats["avg_mfe_pct"],
+            "avg_mae_pct":     stats["avg_mae_pct"],
+            "mfe_capture_pct": stats["mfe_capture_pct"],
+            "suggested_sl_pct": stats["suggested_sl_pct"],
+            "rank_score":      stats["rank_score"],
+            "trading_days":    n_days,
+        }
+
+        return {
+            "symbol":      sym_clean,
+            "summary":     summary,
+            "detail":      detail,
+            "equity_curve": eq_curve,
+            "dd_curve":    dd_curve,
+            "trade_log":   trade_log,
+        }
+
+    def _empty_symbol(self, sym: str) -> dict:
+        return {
+            "symbol":      sym,
+            "summary":     {},
+            "detail":      {"all": {}, "long": {}, "short": {}},
+            "equity_curve": [],
+            "dd_curve":    [],
+            "trade_log":   [],
+        }
+
     def _empty(self) -> dict:
         return {
             "summary":        {},

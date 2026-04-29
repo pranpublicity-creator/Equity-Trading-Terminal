@@ -704,6 +704,30 @@ def api_journal_symbol_stats():
         return jsonify({"stats": {}, "source": "error", "error": str(e)})
 
 
+@app.route("/api/journal_symbol_detail/<symbol>")
+def api_journal_symbol_detail(symbol: str):
+    """Full journal drill-down for a single symbol — powers the popup modal.
+    Returns: summary, detail (all/long/short), equity_curve, dd_curve, trade_log.
+    <symbol> should be the clean ticker e.g. 'KOTAKBANK'.
+    """
+    try:
+        from trading.journal_engine import JournalEngine
+        je     = JournalEngine(total_capital=config.TOTAL_TRADING_CAPITAL)
+        result = je.compute_symbol(symbol, trade_engine.closed_positions)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"journal_symbol_detail error [{symbol}]: {e}", exc_info=True)
+        return jsonify({
+            "symbol":       symbol,
+            "error":        str(e),
+            "summary":      {},
+            "detail":       {"all": {}, "long": {}, "short": {}},
+            "equity_curve": [],
+            "dd_curve":     [],
+            "trade_log":    [],
+        })
+
+
 @app.route("/api/activity_log")
 def api_activity_log():
     """Return last 200 server-side activity log entries (survives browser refresh)."""

@@ -495,6 +495,7 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
           <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Per-Symbol Analytics</span>
           <span class="text-[10px] text-slate-500">Rank = 40% Sharpe + 30% Win Rate + 30% Profit Factor</span>
           <span class="text-[10px] text-amber-400 ml-2">⚡ Suggested SL from MAE 80th-pct of winning trades</span>
+          <span class="text-[10px] text-slate-600 ml-2">· Click 📊 for full symbol drill-down</span>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-xs" id="journalSymbolTable">
@@ -511,6 +512,7 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
                 <th class="text-right px-3 py-1.5 text-amber-400">SL Suggest%</th>
                 <th class="text-right px-3 py-1.5 text-slate-500">Sharpe</th>
                 <th class="text-right px-3 py-1.5 text-slate-500">Score</th>
+                <th class="px-3 py-1.5 text-slate-500 text-center">Detail</th>
               </tr>
             </thead>
             <tbody id="journalSymbolBody" class="divide-y divide-slate-800/50"></tbody>
@@ -518,6 +520,101 @@ body.light [style*="background:#080f1c"]{background:var(--bg-panel)!important;}
         </div>
       </div>
     </div>
+
+    <!-- ═══ Symbol Journal Detail Modal ════════════════════════════════════════ -->
+    <div id="symJournalBackdrop"
+         onclick="if(event.target===this)closeSymbolJournal()"
+         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9000;
+                overflow-y:auto;padding:20px;backdrop-filter:blur(3px);">
+      <div style="max-width:980px;margin:0 auto;background:#0c1829;border:1px solid #334155;
+                  border-radius:12px;overflow:hidden;box-shadow:0 25px 60px rgba(0,0,0,.7);">
+
+        <!-- Modal header -->
+        <div style="background:#0a1220;border-bottom:1px solid #1e293b;"
+             class="flex items-center gap-3 px-5 py-3">
+          <span class="text-base font-bold text-slate-100" id="symJournalTitle">—</span>
+          <span id="symJournalSubtitle" class="text-xs text-slate-500"></span>
+          <div class="ml-auto flex items-center gap-2">
+            <button onclick="downloadSymbolCSV()"
+              class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-semibold
+                     bg-emerald-800 hover:bg-emerald-700 text-emerald-200 transition-colors">
+              ⬇ Download CSV
+            </button>
+            <button onclick="closeSymbolJournal()"
+              class="text-slate-400 hover:text-slate-100 transition-colors text-lg leading-none px-2">✕</button>
+          </div>
+        </div>
+
+        <!-- Modal body -->
+        <div class="p-4">
+
+          <!-- Summary mini-bar -->
+          <div id="symJournalSummary" class="grid grid-cols-4 gap-2 mb-4"></div>
+
+          <!-- Symbol equity chart -->
+          <div class="rounded-lg mb-4 overflow-hidden" style="background:#080f1c;border:1px solid #1e293b;">
+            <div class="flex items-center gap-3 px-3 py-2" style="border-bottom:1px solid #1e293b;">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Equity Curve</span>
+              <span class="text-[10px] text-emerald-400">● Cumulative P&L</span>
+              <span class="text-[10px] text-red-400 ml-2">● Drawdown</span>
+            </div>
+            <div id="symJournalChart" style="width:100%;height:180px;"></div>
+          </div>
+
+          <!-- Trades Analysis -->
+          <div class="rounded-lg mb-4 overflow-hidden" style="background:#080f1c;border:1px solid #1e293b;">
+            <div class="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-400"
+                 style="border-bottom:1px solid #1e293b;">Trades Analysis</div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs">
+                <thead>
+                  <tr style="background:#060d18;">
+                    <th class="text-left px-3 py-1.5 text-slate-500">Metric</th>
+                    <th class="text-right px-3 py-1.5 text-slate-400">All</th>
+                    <th class="text-right px-3 py-1.5 text-emerald-500">Long</th>
+                    <th class="text-right px-3 py-1.5 text-red-400">Short</th>
+                  </tr>
+                </thead>
+                <tbody id="symJournalDetailBody" class="divide-y divide-slate-800/50"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Trade Log -->
+          <div class="rounded-lg overflow-hidden" style="background:#080f1c;border:1px solid #1e293b;">
+            <div class="flex items-center gap-2 px-3 py-2" style="border-bottom:1px solid #1e293b;">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Trade Log</span>
+              <span id="symJournalTradeCount" class="text-[10px] text-slate-600"></span>
+            </div>
+            <div class="overflow-x-auto" style="max-height:320px;overflow-y:auto;">
+              <table class="w-full text-xs">
+                <thead style="position:sticky;top:0;background:#060d18;z-index:1;">
+                  <tr class="text-slate-500 uppercase tracking-wider">
+                    <th class="text-left  px-2 py-1.5">Entry</th>
+                    <th class="text-left  px-2 py-1.5">Exit</th>
+                    <th class="text-center px-2 py-1.5">TF</th>
+                    <th class="text-center px-2 py-1.5">Dir</th>
+                    <th class="text-right px-2 py-1.5">Entry ₹</th>
+                    <th class="text-right px-2 py-1.5">Exit ₹</th>
+                    <th class="text-right px-2 py-1.5">Qty</th>
+                    <th class="text-right px-2 py-1.5">P&L ₹</th>
+                    <th class="text-right px-2 py-1.5">P&L%</th>
+                    <th class="text-right px-2 py-1.5">MAE%</th>
+                    <th class="text-right px-2 py-1.5">MFE%</th>
+                    <th class="text-right px-2 py-1.5">Bars</th>
+                    <th class="text-center px-2 py-1.5">Grade</th>
+                    <th class="text-left  px-2 py-1.5">Pattern</th>
+                    <th class="text-left  px-2 py-1.5">Exit Reason</th>
+                  </tr>
+                </thead>
+                <tbody id="symJournalTradeLog" class="divide-y divide-slate-800/30"></tbody>
+              </table>
+            </div>
+          </div>
+
+        </div><!-- /modal body -->
+      </div><!-- /modal card -->
+    </div><!-- /backdrop -->
 
     <!-- TAB: Confidence Heatmap -->
     <div id="tab-heatmap" style="flex:1;overflow-y:auto;padding:10px;display:none;">
@@ -4015,9 +4112,266 @@ function _renderJournalSymbols(ranking){
       <td class="px-3 py-1.5 text-right">${slCell}</td>
       <td class="px-3 py-1.5 text-right text-slate-300">${(s.sharpe||0).toFixed(2)}</td>
       <td class="px-3 py-1.5 text-right font-bold" style="color:${scClr};">${sc.toFixed(0)}</td>
+      <td class="px-3 py-1.5 text-center">
+        <button onclick="openSymbolJournal('${s.symbol}')"
+          title="Full journal drill-down for ${s.symbol}"
+          class="text-base hover:scale-125 transition-transform" style="line-height:1;">📊</button>
+      </td>
     </tr>`;
   }).join('');
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Symbol Journal Detail Modal
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _symJournalChartInst = null;   // LW chart instance — destroyed on close
+let _symJournalTradeData = [];     // current symbol's trade_log for CSV export
+let _symJournalCurrentSym = '';    // current symbol name
+
+async function openSymbolJournal(sym){
+  _symJournalCurrentSym = sym;
+  const backdrop = document.getElementById('symJournalBackdrop');
+  if(!backdrop) return;
+
+  // Show modal with loading state
+  document.getElementById('symJournalTitle').textContent = sym;
+  document.getElementById('symJournalSubtitle').textContent = 'Loading…';
+  document.getElementById('symJournalSummary').innerHTML    = '';
+  document.getElementById('symJournalDetailBody').innerHTML = '';
+  document.getElementById('symJournalTradeLog').innerHTML   = '';
+  document.getElementById('symJournalTradeCount').textContent = '';
+  backdrop.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+
+  // Destroy previous chart instance
+  if(_symJournalChartInst){ try{ _symJournalChartInst.remove(); }catch(e){} _symJournalChartInst=null; }
+  document.getElementById('symJournalChart').innerHTML = '';
+
+  try{
+    const r = await fetch(`/api/journal_symbol_detail/${encodeURIComponent(sym)}`);
+    const d = await r.json();
+    if(d.error){ document.getElementById('symJournalSubtitle').textContent='Error: '+d.error; return; }
+
+    _symJournalTradeData = d.trade_log || [];
+    const s = d.summary || {};
+    const n = s.total_trades || 0;
+
+    document.getElementById('symJournalSubtitle').textContent =
+      `${n} trade${n!==1?'s':''} · ${s.trading_days||0} day${(s.trading_days||0)!==1?'s':''}`;
+
+    _renderSymbolSummary(s);
+    _renderSymbolChart(d.equity_curve||[], d.dd_curve||[]);
+    _renderSymbolDetail(d.detail||{});
+    _renderSymbolTradeLog(_symJournalTradeData);
+
+  }catch(e){
+    document.getElementById('symJournalSubtitle').textContent = 'Failed to load: '+e.message;
+    console.error('openSymbolJournal error:', e);
+  }
+}
+
+function closeSymbolJournal(){
+  const backdrop = document.getElementById('symJournalBackdrop');
+  if(backdrop) backdrop.style.display = 'none';
+  document.body.style.overflow = '';
+  if(_symJournalChartInst){ try{ _symJournalChartInst.remove(); }catch(e){} _symJournalChartInst=null; }
+}
+
+// ── Summary mini-bar ──────────────────────────────────────────────────────────
+function _renderSymbolSummary(s){
+  const el = document.getElementById('symJournalSummary');
+  if(!el) return;
+  const pnl  = s.total_pnl||0;
+  const pnlC = pnl>=0?'#10b981':'#ef4444';
+  const wr   = s.win_rate||0; const wrC=wr>=60?'#10b981':wr>=45?'#f59e0b':'#ef4444';
+  const pf   = s.profit_factor||0; const pfC=pf>=1.5?'#10b981':pf>=1.0?'#f59e0b':'#ef4444';
+  const sc   = s.rank_score||0; const scC=sc>=60?'#10b981':sc>=40?'#f59e0b':'#ef4444';
+  const sl   = s.suggested_sl_pct;
+  const slTxt= sl!=null ? sl.toFixed(2)+'%' : '—';
+  const slC  = sl!=null ? (sl<0.3?'#ef4444':sl<0.5?'#f59e0b':'#22d3ee') : '#64748b';
+
+  const cards = [
+    ['Net P&L',      `₹${Math.abs(pnl).toLocaleString('en-IN',{maximumFractionDigits:0})}${pnl<0?' (loss)':''}`, pnlC],
+    ['Win Rate',     `${wr.toFixed(1)}%  (${s.winning||0}W / ${s.losing||0}L)`, wrC],
+    ['Profit Factor',`${pf.toFixed(2)}`, pfC],
+    ['Sharpe',       `${(s.sharpe||0).toFixed(2)}`, '#94a3b8'],
+    ['Sortino',      `${(s.sortino||0).toFixed(2)}`, '#94a3b8'],
+    ['Max DD',       `₹${(s.max_dd||0).toLocaleString('en-IN',{maximumFractionDigits:0})}`, '#ef4444'],
+    ['SL Suggest',   slTxt, slC],
+    ['Score',        `${(sc).toFixed(0)} / 100`, scC],
+  ];
+
+  el.innerHTML = cards.map(([label,val,clr])=>`
+    <div style="background:#080f1c;border:1px solid #1e293b;border-radius:8px;padding:8px 12px;">
+      <div class="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">${label}</div>
+      <div class="text-sm font-bold truncate" style="color:${clr};">${val}</div>
+    </div>`).join('');
+}
+
+// ── Symbol equity + drawdown chart ────────────────────────────────────────────
+function _renderSymbolChart(eqCurve, ddCurve){
+  const host = document.getElementById('symJournalChart');
+  if(!host) return;
+  if(!eqCurve.length && !ddCurve.length){
+    host.innerHTML='<div class="text-center text-slate-600 py-10 text-xs">No chart data</div>';
+    return;
+  }
+  try{
+    const chart = LightweightCharts.createChart(host,{
+      width: host.clientWidth, height: 180,
+      layout:      {background:{color:'#080f1c'}, textColor:'#94a3b8'},
+      grid:        {vertLines:{color:'#0f172a'}, horzLines:{color:'#0f172a'}},
+      crosshair:   {mode:1},
+      rightPriceScale:{borderColor:'#1e293b'},
+      timeScale:   {borderColor:'#1e293b', timeVisible:true},
+    });
+    _symJournalChartInst = chart;
+
+    if(eqCurve.length){
+      const eq = chart.addAreaSeries({
+        topColor:'rgba(16,185,129,.25)', bottomColor:'rgba(16,185,129,.02)',
+        lineColor:'#10b981', lineWidth:2,
+        priceScaleId:'left',
+      });
+      chart.applyOptions({leftPriceScale:{visible:true, borderColor:'#1e293b'}});
+      eq.setData(eqCurve.map(p=>({time:p.time, value:p.value})));
+    }
+    if(ddCurve.length){
+      const dd = chart.addAreaSeries({
+        topColor:'rgba(239,68,68,.0)', bottomColor:'rgba(239,68,68,.18)',
+        lineColor:'#ef4444', lineWidth:1,
+        priceScaleId:'right',
+      });
+      dd.setData(ddCurve.map(p=>({time:p.time, value:p.value})));
+    }
+    chart.timeScale().fitContent();
+
+    // Responsive resize
+    const ro = new ResizeObserver(()=>{ chart.applyOptions({width:host.clientWidth}); });
+    ro.observe(host);
+  }catch(e){ console.error('symJournalChart error:', e); }
+}
+
+// ── Trades Analysis table (All / Long / Short) ────────────────────────────────
+function _renderSymbolDetail(detail){
+  const tbody = document.getElementById('symJournalDetailBody');
+  if(!tbody) return;
+  const a = detail.all||{}, l = detail.long||{}, s = detail.short||{};
+
+  function inr(v){ return v!=null&&v!==0 ? '₹'+Number(v).toLocaleString('en-IN',{maximumFractionDigits:2}) : '—'; }
+  function pct(v){ return v!=null&&v!==0 ? Number(v).toFixed(2)+'%' : '—'; }
+  function num(v,d=2){ return (v!=null&&v!==''&&v!==0) ? Number(v).toFixed(d) : '—'; }
+
+  const rows = [
+    ['── Overview ──',              '',                          '',                          '',              false],
+    ['Total Trades',                a.total,                     l.total,                     s.total,         false],
+    ['Profitable',                  a.winning,                   l.winning,                   s.winning,       false],
+    ['Win Rate %',                  pct(a.pct_profitable),       pct(l.pct_profitable),       pct(s.pct_profitable), false],
+    ['Profit Factor',               num(a.profit_factor),        num(l.profit_factor),        num(s.profit_factor), false],
+    ['── P&L ──',                   '',                          '',                          '',              false],
+    ['Avg Trade ₹',                 inr(a.avg_pnl_abs),          inr(l.avg_pnl_abs),          inr(s.avg_pnl_abs), true],
+    ['Avg Win ₹',                   inr(a.avg_win_abs),          inr(l.avg_win_abs),          inr(s.avg_win_abs), true],
+    ['Avg Loss ₹',                  inr(a.avg_loss_abs),         inr(l.avg_loss_abs),         inr(s.avg_loss_abs), false],
+    ['Largest Win ₹',               inr(a.largest_win_abs),      inr(l.largest_win_abs),      inr(s.largest_win_abs), false],
+    ['Largest Loss ₹',              inr(a.largest_loss_abs),     inr(l.largest_loss_abs),     inr(s.largest_loss_abs), false],
+    ['Win / Loss Ratio',            num(a.ratio_win_loss),       num(l.ratio_win_loss),       num(s.ratio_win_loss), false],
+    ['── Excursion ──',             '',                          '',                          '',              false],
+    ['Avg MAE %',                   pct(a.avg_mae_pct),          pct(l.avg_mae_pct),          pct(s.avg_mae_pct), false],
+    ['Avg MFE %',                   pct(a.avg_mfe_pct),          pct(l.avg_mfe_pct),          pct(s.avg_mfe_pct), false],
+    ['MFE Capture %',               pct(a.mfe_capture_pct),      pct(l.mfe_capture_pct),      pct(s.mfe_capture_pct), false],
+    ['── Duration ──',              '',                          '',                          '',              false],
+    ['Avg Bars (all)',               a.avg_bars,                  l.avg_bars,                  s.avg_bars,      false],
+    ['Avg Bars (winners)',           a.avg_bars_winning,          l.avg_bars_winning,          s.avg_bars_winning, false],
+    ['Avg Bars (losers)',            a.avg_bars_losing,           l.avg_bars_losing,           s.avg_bars_losing, false],
+  ];
+
+  tbody.innerHTML = rows.map(([label,av,lv,sv,colorize])=>{
+    if(av===''&&lv===''&&sv==='') return `<tr><td colspan="4" class="px-3 py-1 text-[9px] text-slate-600 font-semibold uppercase tracking-wider">${label}</td></tr>`;
+    const style = colorize && parseFloat(av)>0 ? 'color:#10b981;' : colorize && parseFloat(av)<0 ? 'color:#ef4444;' : '';
+    return `<tr class="hover:bg-slate-800/20">
+      <td class="px-3 py-1 text-slate-400">${label}</td>
+      <td class="px-3 py-1 text-right font-mono" style="${style}">${av??'—'}</td>
+      <td class="px-3 py-1 text-right font-mono text-emerald-400/80">${lv??'—'}</td>
+      <td class="px-3 py-1 text-right font-mono text-red-400/80">${sv??'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Individual trade log table ────────────────────────────────────────────────
+function _renderSymbolTradeLog(trades){
+  const tbody = document.getElementById('symJournalTradeLog');
+  const cntEl = document.getElementById('symJournalTradeCount');
+  if(!tbody) return;
+  if(cntEl) cntEl.textContent = `${trades.length} trade${trades.length!==1?'s':''}`;
+  if(!trades.length){
+    tbody.innerHTML='<tr><td colspan="15" class="text-center text-slate-600 py-6 text-xs">No closed trades</td></tr>';
+    return;
+  }
+
+  const _gradeColor = {A:'#10b981',B:'#34d399',C:'#f59e0b',D:'#fb923c',F:'#ef4444'};
+
+  tbody.innerHTML = [...trades].reverse().map(t=>{
+    const win  = t.pnl > 0;
+    const pnlC = win ? '#10b981' : '#ef4444';
+    const dirC = t.direction==='BUY' ? '#10b981' : '#f87171';
+    const gradeC = _gradeColor[t.grade] || '#64748b';
+    const maeC = t.mae_pct < -0.5 ? '#ef4444' : '#94a3b8';
+    const mfeC = t.mfe_pct > 0.5  ? '#10b981' : '#94a3b8';
+    return `<tr class="hover:bg-slate-800/20 transition-colors ${win?'':'opacity-90'}">
+      <td class="px-2 py-1 text-slate-400 whitespace-nowrap text-[10px]">${t.entry_date}</td>
+      <td class="px-2 py-1 text-slate-400 whitespace-nowrap text-[10px]">${t.exit_date}</td>
+      <td class="px-2 py-1 text-center text-[10px]"><span class="${t.timeframe==='Intraday'?'text-violet-400':'text-amber-400'}">${t.timeframe==='Intraday'?'⚡':'📈'} ${t.timeframe}</span></td>
+      <td class="px-2 py-1 text-center font-semibold text-[10px]" style="color:${dirC};">${t.direction}</td>
+      <td class="px-2 py-1 text-right font-mono text-[10px] text-slate-300">₹${t.entry_price.toLocaleString('en-IN')}</td>
+      <td class="px-2 py-1 text-right font-mono text-[10px] text-slate-300">₹${t.exit_price.toLocaleString('en-IN')}</td>
+      <td class="px-2 py-1 text-right text-[10px] text-slate-500">${t.quantity}</td>
+      <td class="px-2 py-1 text-right font-bold font-mono text-[10px]" style="color:${pnlC};">${t.pnl>=0?'+':''}₹${Math.abs(t.pnl).toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
+      <td class="px-2 py-1 text-right font-mono text-[10px]" style="color:${pnlC};">${t.pnl_pct>=0?'+':''}${t.pnl_pct.toFixed(2)}%</td>
+      <td class="px-2 py-1 text-right font-mono text-[10px]" style="color:${maeC};">${t.mae_pct.toFixed(2)}%</td>
+      <td class="px-2 py-1 text-right font-mono text-[10px]" style="color:${mfeC};">+${t.mfe_pct.toFixed(2)}%</td>
+      <td class="px-2 py-1 text-right text-[10px] text-slate-500">${t.bars||'—'}</td>
+      <td class="px-2 py-1 text-center">
+        <span class="text-[9px] font-bold px-1.5 py-0.5 rounded" style="background:${gradeC}22;color:${gradeC};">${t.grade}</span>
+      </td>
+      <td class="px-2 py-1 text-[10px] text-slate-400 whitespace-nowrap">${t.pattern}</td>
+      <td class="px-2 py-1 text-[10px] text-slate-500 whitespace-nowrap">${t.exit_reason}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Download trade log as CSV ─────────────────────────────────────────────────
+function downloadSymbolCSV(){
+  const trades = _symJournalTradeData;
+  const sym    = _symJournalCurrentSym;
+  if(!trades.length){ alert('No trade data to download.'); return; }
+
+  const headers = [
+    'Entry Date','Exit Date','Timeframe','Direction',
+    'Entry ₹','Exit ₹','Qty','P&L ₹','P&L %',
+    'MAE %','MFE %','Bars','Grade','Pattern','Exit Reason','Charges ₹'
+  ];
+  const rows = trades.map(t=>[
+    t.entry_date, t.exit_date, t.timeframe, t.direction,
+    t.entry_price, t.exit_price, t.quantity, t.pnl, t.pnl_pct,
+    t.mae_pct, t.mfe_pct, t.bars, t.grade, t.pattern, t.exit_reason, t.charges
+  ].map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(','));
+
+  const csv  = [headers.join(','), ...rows].join('\r\n');
+  const blob = new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8;'});
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), {
+    href: url,
+    download: `${sym}_trade_journal_${new Date().toISOString().slice(0,10)}.csv`
+  });
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+}
+
+// Close on Escape key
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape') closeSymbolJournal();
+});
 
 // ── Force Close All Intraday (manual trigger, works any time of day) ─────────
 async function forceCloseAllIntraday(){
